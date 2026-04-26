@@ -63,7 +63,7 @@ async def my_agent(ctx: JobContext):
 
     stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
     if stt_provider == "whisper":
-        default_stt_base_url = "http://whisper:80/v1"
+        default_stt_base_url = "http://whisper:8000/v1"
         default_stt_model = "whisper-large-v3"
     else:
         default_stt_base_url = "http://nemotron:8000/v1"
@@ -94,7 +94,7 @@ async def my_agent(ctx: JobContext):
             api_key="no-key-needed"
         ),
         tts=openai.TTS(
-            base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8880/v1"),
+            base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8020/v1"),
             model="xtts",
             voice="Arabic Female",
             api_key="no-key-needed"

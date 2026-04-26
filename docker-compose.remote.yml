@@ -18,7 +18,7 @@ services:
     environment:
       - VOXBOX_HF_REPO_ID=${VOXBOX_HF_REPO_ID:-h2oai/faster-whisper-large-v3-turbo}
     ports:
-      - "11435:80"
+      - "11435:8000"
     restart: unless-stopped
 
   llama_cpp:
