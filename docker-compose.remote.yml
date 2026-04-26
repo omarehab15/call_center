@@ -13,6 +13,8 @@ services:
       - COQUI_TOS_AGREED=1
     volumes:
       - xtts-cache:/models
+      - ./inference/xtts/voices:/app/voices
+      - ./inference/xtts/config:/app/config
     restart: unless-stopped
 
   whisper:
