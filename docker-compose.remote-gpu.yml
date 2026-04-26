@@ -5,6 +5,13 @@ services:
     build:
       args:
         KOKORO_IMAGE: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:latest}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   llama_cpp:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -16,7 +23,8 @@ services:
               count: all
               capabilities: [gpu]
     environment:
-      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_N_GPU_LAYERS:-35}
+      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_N_GPU_LAYERS:--1}
+      - LLAMA_ARG_FLASH_ATTN=1
 
   nemotron:
     build:
