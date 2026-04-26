@@ -3,9 +3,14 @@
 # All endpoints are OpenAI-compatible and exposed on 0.0.0.0 for Tailscale access
 services:
   xtts:
-    image: daswer123/xtts-api-server:latest
+    image: ghcr.io/matatonic/openedai-speech:latest
     ports:
-      - "8880:8020"
+      - "8880:8000"
+    environment:
+      - TTS_HOME=/models
+      - HF_HOME=/models
+      - PRELOAD_MODEL=xtts
+      - COQUI_TOS_AGREED=1
     volumes:
       - xtts-cache:/models
     restart: unless-stopped
