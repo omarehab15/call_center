@@ -19,6 +19,7 @@ RUN apt-get update && \
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --upgrade pip "setuptools<70.0.0" wheel \
+    && python3 -m pip install openai-whisper --no-build-isolation \
     && python3 -m pip install vox-box
 
 WORKDIR /app
