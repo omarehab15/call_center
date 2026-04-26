@@ -1,0 +1,5 @@
+tts-1-hd:
+  amado:
+    model: xtts
+    speaker: voices/amado.wav
+    language: ar

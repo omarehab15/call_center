@@ -85,7 +85,8 @@ async def my_agent(ctx: JobContext):
             base_url=stt_base_url,
             # base_url="http://localhost:11435/v1", # uncomment for local testing
             model=stt_model,
-            api_key=stt_api_key
+            api_key=stt_api_key,
+            language="ar"
         ),
         llm=openai.LLM(
             base_url=llama_base_url,
@@ -95,8 +96,8 @@ async def my_agent(ctx: JobContext):
         ),
         tts=openai.TTS(
             base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8000/v1"),
-            model="tts-1",
-            voice="alloy",
+            model="tts-1-hd",
+            voice="amado",
             api_key="no-key-needed"
         ),
         turn_detection=MultilingualModel(),
