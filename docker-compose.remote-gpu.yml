@@ -1,10 +1,7 @@
 # GPU overlay for docker-compose.remote.yml
 # Use with: docker compose -f docker-compose.remote.yml -f docker-compose.remote-gpu.yml up
 services:
-  kokoro:
-    build:
-      args:
-        KOKORO_IMAGE: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:latest}
+  xtts:
     deploy:
       resources:
         reservations:
@@ -26,11 +23,9 @@ services:
       - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_N_GPU_LAYERS:--1}
       - LLAMA_ARG_FLASH_ATTN=1
 
-  nemotron:
-    build:
-      args:
-        NEMOTRON_BASE: ${NEMOTRON_BASE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
-        TORCH_INDEX_URL: ${NEMOTRON_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu124}
+  whisper:
+    environment:
+      - VOXBOX_DEVICE=cuda
     deploy:
       resources:
         reservations:

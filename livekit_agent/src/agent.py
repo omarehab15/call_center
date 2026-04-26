@@ -23,10 +23,10 @@ load_dotenv(".env.local")
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions="""You are a helpful voice AI assistant. The user is interacting with you via voice, even if you perceive the conversation as text.
-            You eagerly assist users with their questions by providing information from your extensive knowledge.
-            Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
-            You are curious, friendly, and have a sense of humor.""",
+            instructions="""أنت مساعد ذكاء اصطناعي صوتي مفيد. يتفاعل المستخدم معك عبر الصوت.
+            أجب على أسئلة المستخدم بوضوح وبشكل مباشر.
+            يجب أن تكون إجاباتك موجزة ومختصرة، وبدون أي تنسيقات معقدة أو رموز تعبيرية أو علامات نجمية.
+            كن ودوداً ولديك حس فكاهة.""",
         )
 
     @function_tool()
@@ -36,14 +36,14 @@ class Assistant(Agent):
         number1: int,
         number2: int,
     ) -> dict[str, Any]:
-        """Multiply two numbers.
+        """اضرب رقمين.
         
         Args:
-            number1: The first number to multiply.
-            number2: The second number to multiply.
+            number1: الرقم الأول للضرب.
+            number2: الرقم الثاني للضرب.
         """
 
-        return f"The product of {number1} and {number2} is {number1 * number2}."
+        return f"حاصل ضرب {number1} و {number2} هو {number1 * number2}."
 
 server = AgentServer()
 
@@ -58,13 +58,13 @@ async def my_agent(ctx: JobContext):
         "room": ctx.room.name,
     }
 
-    llama_model = os.getenv("LLAMA_MODEL", "qwen3-4b")
+    llama_model = os.getenv("LLAMA_MODEL", "qwen3-30b")
     llama_base_url = os.getenv("LLAMA_BASE_URL", "http://llama_cpp:11434/v1")
 
-    stt_provider = os.getenv("STT_PROVIDER", "nemotron").lower()
+    stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
     if stt_provider == "whisper":
         default_stt_base_url = "http://whisper:80/v1"
-        default_stt_model = "Systran/faster-whisper-small"
+        default_stt_model = "whisper-large-v3"
     else:
         default_stt_base_url = "http://nemotron:8000/v1"
         default_stt_model = "nemotron-speech-streaming"
@@ -94,9 +94,9 @@ async def my_agent(ctx: JobContext):
             api_key="no-key-needed"
         ),
         tts=openai.TTS(
-            base_url=os.getenv("KOKORO_BASE_URL", "http://kokoro:8880/v1"),
-            model="kokoro",
-            voice="af_nova",
+            base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8880/v1"),
+            model="xtts",
+            voice="Arabic Female",
             api_key="no-key-needed"
         ),
         turn_detection=MultilingualModel(),

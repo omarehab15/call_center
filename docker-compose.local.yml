@@ -27,13 +27,13 @@ services:
       - LIVEKIT_AGENT_PORT=7880
       - OPENAI_API_KEY=${OPENAI_API_KEY:-no-key-needed}
       # Remote model endpoints (via Tailscale)
-      - STT_PROVIDER=${STT_PROVIDER:-nemotron}
+      - STT_PROVIDER=${STT_PROVIDER:-whisper}
       - STT_BASE_URL=${STT_BASE_URL}
-      - STT_MODEL=${STT_MODEL:-nemotron-speech-streaming}
+      - STT_MODEL=${STT_MODEL:-h2oai/faster-whisper-large-v3-turbo}
       - STT_API_KEY=${STT_API_KEY:-no-key-needed}
       - LLAMA_BASE_URL=${LLAMA_BASE_URL}
-      - LLAMA_MODEL=${LLAMA_MODEL:-qwen3-4b}
-      - KOKORO_BASE_URL=${KOKORO_BASE_URL}
+      - LLAMA_MODEL=${LLAMA_MODEL:-qwen3-30b}
+      - XTTS_BASE_URL=${XTTS_BASE_URL}
     depends_on:
       livekit:
         condition: service_started
