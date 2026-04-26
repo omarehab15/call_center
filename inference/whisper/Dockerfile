@@ -1,20 +1,17 @@
 # syntax=docker/dockerfile:1.5
-ARG WHISPER_BASE=python:3.10-slim
+ARG WHISPER_BASE=nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 FROM ${WHISPER_BASE}
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     curl \
-    && if ! command -v python3 >/dev/null 2>&1; then \
-        apt-get install -y --no-install-recommends python3 python3-pip; \
-    fi \
-    && if ! command -v pip3 >/dev/null 2>&1; then \
-        apt-get install -y --no-install-recommends python3-pip; \
-    fi \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.cache/pip \

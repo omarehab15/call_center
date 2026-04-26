@@ -95,7 +95,7 @@ async def my_agent(ctx: JobContext):
         ),
         tts=openai.TTS(
             base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8000/v1"),
-            model="xtts",
+            model="tts-1",
             voice="alloy",
             api_key="no-key-needed"
         ),
