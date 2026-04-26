@@ -46,23 +46,25 @@ RUN mkdir -p src
 # Ensure your uv.lock file is checked in for consistency across environments
 RUN uv sync --locked
 
-# Copy all remaining application files into the container
-# This includes source code, configuration files, and dependency specifications
-# (Excludes files specified in .dockerignore)
-COPY . .
-
-# Change ownership of all app files to the non-privileged user
-# This ensures the application can read/write files as needed
+# Change ownership of the app directory so the non-privileged user can run downloads
 RUN chown -R appuser:appuser /app
 
-# Switch to the non-privileged user for all subsequent operations
-# This improves security by not running as root
+# Switch to the non-privileged user
 USER appuser
+
+# Copy ONLY the agent file first, to cache the download step
+# so that it only runs when agent.py changes, not on any source code change.
+COPY --chown=appuser:appuser src/agent.py src/agent.py
 
 # Pre-download any ML models or files the agent needs
 # This ensures the container is ready to run immediately without downloading
 # dependencies at runtime, which improves startup time and reliability
 RUN uv run src/agent.py download-files
+
+# Copy all remaining application files into the container
+# This includes source code, configuration files, and dependency specifications
+# (Excludes files specified in .dockerignore)
+COPY --chown=appuser:appuser . .
 
 # Run the application using UV
 # UV will activate the virtual environment and run the agent.
