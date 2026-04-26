@@ -32,13 +32,19 @@ echo ""
 # Check connectivity to remote models
 echo "Checking remote model connectivity..."
 FAILED=0
-for endpoint in "$REMOTE_HOST:8880/v1/models" "$REMOTE_HOST:11435/v1/models" "$REMOTE_HOST:11436/v1/models"; do
+# XTTS might return 404 for /v1/models but the port is open, so we just check if it responds at all
+for endpoint in "$REMOTE_HOST:8880/docs" "$REMOTE_HOST:11435/v1/models" "$REMOTE_HOST:11436/v1/models"; do
   PORT=$(echo "$endpoint" | grep -oP ':\K[0-9]+')
   if curl -sf --connect-timeout 5 "http://$endpoint" > /dev/null 2>&1; then
     echo "  ✓ Port $PORT reachable"
   else
-    echo "  ✗ Port $PORT NOT reachable"
-    FAILED=1
+    # if it's port 8880, try one more time without -f to see if it's just a 404
+    if [ "$PORT" = "8880" ] && curl -s --connect-timeout 5 "http://$endpoint" > /dev/null 2>&1; then
+        echo "  ✓ Port $PORT reachable"
+    else
+        echo "  ✗ Port $PORT NOT reachable"
+        FAILED=1
+    fi
   fi
 done
 
