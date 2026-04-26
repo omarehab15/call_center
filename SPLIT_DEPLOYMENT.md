@@ -8,8 +8,8 @@ Run the voice AI stack across two machines: GPU models on a vast.ai machine, and
 ┌─────────────────────────────┐      ┌─────────────────────────────────┐
 │     LOCAL MACHINE           │      │   VAST.AI MACHINE (100.x.x.x)  │
 │                             │      │                                 │
-│  Browser ←──WebRTC──→ LiveKit│      │   Kokoro TTS      (:8880)     │
-│                    (:7880)  │      │   Nemotron STT    (:11435)     │
+│  Browser ←──WebRTC──→ LiveKit│      │   XTTS TTS        (:8880)     │
+│                    (:7880)  │      │   Whisper STT     (:11435)     │
 │  Frontend          (:3000)  │      │   llama.cpp LLM   (:11436)     │
 │                             │      │                                 │
 │  Agent ──── HTTP/Tailscale ──────→ │   (all OpenAI-compatible APIs) │
@@ -44,8 +44,8 @@ docker compose -f docker-compose.remote.yml -f docker-compose.remote-gpu.yml ps
 ```
 
 All three services should show `healthy`:
-- `kokoro` — TTS on port 8880
-- `nemotron` — STT on port 11435
+- `xtts` — TTS on port 8880
+- `whisper` — STT on port 11435
 - `llama_cpp` — LLM on port 11436
 
 ### Step 2 — Configure your local machine

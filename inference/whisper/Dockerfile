@@ -18,7 +18,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --upgrade pip setuptools wheel \
+    python3 -m pip install --upgrade pip "setuptools<70.0.0" wheel \
     && python3 -m pip install vox-box
 
 WORKDIR /app
