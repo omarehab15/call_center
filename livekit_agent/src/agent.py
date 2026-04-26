@@ -63,7 +63,7 @@ async def my_agent(ctx: JobContext):
 
     stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
     if stt_provider == "whisper":
-        default_stt_base_url = "http://whisper:8000/v1"
+        default_stt_base_url = "http://whisper:80/v1"
         default_stt_model = "whisper-large-v3"
     else:
         default_stt_base_url = "http://nemotron:8000/v1"
