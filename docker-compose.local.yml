@@ -1,0 +1,67 @@
+# docker-compose.local.yml — Run on your local machine
+# LiveKit server + LiveKit Agent + Frontend
+# The agent connects to remote model APIs on the vast.ai machine via Tailscale
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml --env-file .env.local up --build
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+    command: --dev --bind "0.0.0.0"
+    networks:
+      - local_network
+
+  livekit_agent:
+    build:
+      context: ./livekit_agent
+    env_file:
+      - .env.local
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_HOST=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - LIVEKIT_AGENT_PORT=7880
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-no-key-needed}
+      # Remote model endpoints (via Tailscale)
+      - STT_PROVIDER=${STT_PROVIDER:-nemotron}
+      - STT_BASE_URL=${STT_BASE_URL}
+      - STT_MODEL=${STT_MODEL:-nemotron-speech-streaming}
+      - STT_API_KEY=${STT_API_KEY:-no-key-needed}
+      - LLAMA_BASE_URL=${LLAMA_BASE_URL}
+      - LLAMA_MODEL=${LLAMA_MODEL:-qwen3-4b}
+      - KOKORO_BASE_URL=${KOKORO_BASE_URL}
+    depends_on:
+      livekit:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/ > /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - local_network
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7880
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+    depends_on:
+      livekit:
+        condition: service_started
+    networks:
+      - local_network
+
+networks:
+  local_network:
+    driver: bridge

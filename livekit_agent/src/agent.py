@@ -94,8 +94,7 @@ async def my_agent(ctx: JobContext):
             api_key="no-key-needed"
         ),
         tts=openai.TTS(
-            base_url="http://kokoro:8880/v1",
-            # base_url="http://localhost:8880/v1", # uncomment for local testing
+            base_url=os.getenv("KOKORO_BASE_URL", "http://kokoro:8880/v1"),
             model="kokoro",
             voice="af_nova",
             api_key="no-key-needed"

@@ -1,6 +1,11 @@
 venv/
 inference/llama/models/
 
+# Environment files with machine-specific config
+.env
+.env.local
+.env.remote
+
 # Python cache artifacts
 **/__pycache__/
 *.pyc
