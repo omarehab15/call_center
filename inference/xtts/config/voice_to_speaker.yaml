@@ -1,5 +1,5 @@
 tts-1-hd:
-  amado:
+  fahad:
     model: xtts
     speaker: voices/Fasseh-fahad.wav
     language: ar
