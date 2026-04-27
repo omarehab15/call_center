@@ -52,14 +52,13 @@ RUN chown -R appuser:appuser /app
 # Switch to the non-privileged user
 USER appuser
 
-# Copy ONLY the agent file first, to cache the download step
-# so that it only runs when agent.py changes, not on any source code change.
-COPY --chown=appuser:appuser src/agent.py src/agent.py
-
 # Pre-download any ML models or files the agent needs
-# This ensures the container is ready to run immediately without downloading
-# dependencies at runtime, which improves startup time and reliability
-RUN uv run src/agent.py download-files
+# We do this before copying the application code to cache the download step
+# so that it only runs when dependencies (uv.lock) change.
+RUN uv run python -c "from livekit.agents.plugin import Plugin; \
+    from livekit.plugins import silero, openai; \
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel; \
+    [p.download_files() for p in Plugin.registered_plugins]"
 
 # Copy all remaining application files into the container
 # This includes source code, configuration files, and dependency specifications
