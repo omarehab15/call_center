@@ -3,8 +3,3 @@ tts-1-hd:
     model: xtts
     speaker: voices/amado.wav
     language: ar
-
-  saudi-female:
-    model: xtts
-    speaker: voices/saudi-female.wav
-    language: ar
