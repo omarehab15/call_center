@@ -1,7 +1,7 @@
 # GPU overlay for docker-compose.remote.yml
 # Use with: docker compose -f docker-compose.remote.yml -f docker-compose.remote-gpu.yml up
 services:
-  xtts:
+  lahgtna:
     deploy:
       resources:
         reservations:
