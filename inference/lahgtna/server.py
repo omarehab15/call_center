@@ -10,7 +10,9 @@ import io
 import logging
 import os
 import time
+import asyncio
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -202,7 +204,11 @@ async def text_to_speech(req: SpeechRequest):
         if voice_file:
             generate_kwargs["audio_prompt_path"] = voice_file
 
-        wav = MODEL.generate(text, **generate_kwargs)
+        loop = asyncio.get_event_loop()
+        wav = await loop.run_in_executor(
+            None,
+            partial(MODEL.generate, text, **generate_kwargs),
+        )
 
     except Exception as exc:
         logger.exception("Generation failed: %s", exc)
