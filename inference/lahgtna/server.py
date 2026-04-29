@@ -17,7 +17,6 @@ import io
 import logging
 import os
 import time
-import re
 from contextlib import asynccontextmanager
 
 import torch
@@ -170,15 +169,39 @@ def resolve_voice_file(voice_name: str) -> str | None:
 # Audio helpers
 # ─────────────────────────────────────────────
 
-def tensor_to_wav_bytes(wav_tensor: torch.Tensor, sample_rate: int) -> bytes:
-    """Convert a torchaudio waveform tensor to raw WAV bytes."""
-    buf = io.BytesIO()
-    # Ensure shape is (channels, samples)
+def tensor_to_audio_bytes(
+    wav_tensor: torch.Tensor, sample_rate: int, fmt: str = "mp3"
+) -> tuple[bytes, str]:
+    """
+    Convert a torchaudio waveform tensor to audio bytes in the requested format.
+
+    Returns (audio_bytes, mime_type).
+
+    Supported formats:
+      mp3  — default; what LiveKit openai.TTS requests
+      wav  — lossless, larger
+      pcm  — raw signed 16-bit little-endian samples, no header
+    """
     if wav_tensor.dim() == 1:
         wav_tensor = wav_tensor.unsqueeze(0)
-    ta.save(buf, wav_tensor.cpu(), sample_rate, format="wav")
+    wav_tensor = wav_tensor.cpu()
+
+    fmt = fmt.lower()
+
+    if fmt == "pcm":
+        pcm = (wav_tensor * 32767).clamp(-32768, 32767).short()
+        return pcm.numpy().tobytes(), "audio/pcm"
+
+    buf = io.BytesIO()
+    if fmt == "mp3":
+        ta.save(buf, wav_tensor, sample_rate, format="mp3")
+        mime = "audio/mpeg"
+    else:
+        ta.save(buf, wav_tensor, sample_rate, format="wav")
+        mime = "audio/wav"
+
     buf.seek(0)
-    return buf.read()
+    return buf.read(), mime
 
 
 # ─────────────────────────────────────────────
@@ -202,7 +225,7 @@ class SpeechRequest(BaseModel):
     model: str = "tts-1-hd"
     input: str
     voice: str = "fahad"
-    response_format: str = "wav"
+    response_format: str = "mp3"  # matches LiveKit openai.TTS default
     speed: float = 1.0
     # Chatterbox-specific overrides (optional)
     exaggeration: float | None = None
@@ -288,13 +311,13 @@ async def text_to_speech(req: SpeechRequest):
         elapsed / max(audio_duration, 0.001),
     )
 
-    wav_bytes = tensor_to_wav_bytes(wav, MODEL_SR)
+    audio_bytes, mime_type = tensor_to_audio_bytes(wav, MODEL_SR, req.response_format)
 
     return Response(
-        content=wav_bytes,
-        media_type="audio/wav",
+        content=audio_bytes,
+        media_type=mime_type,
         headers={
-            "Content-Disposition": "inline; filename=speech.wav",
+            "Content-Disposition": f"inline; filename=speech.{req.response_format}",
             "X-RTF": f"{elapsed / max(audio_duration, 0.001):.3f}",
         },
     )
@@ -367,7 +390,8 @@ async def text_to_speech_stream(req: SpeechRequest):
                     del kwargs["repetition_penalty"]
                     wav = MODEL.generate(**kwargs)
 
-                yield tensor_to_wav_bytes(wav, MODEL_SR)
+                audio_bytes, _ = tensor_to_audio_bytes(wav, MODEL_SR, req.response_format)
+                yield audio_bytes
             except Exception as exc:
                 logger.error("Chunk generation failed: %s", exc)
                 # skip failed chunk rather than aborting stream
