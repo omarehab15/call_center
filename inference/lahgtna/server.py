@@ -80,6 +80,14 @@ def load_model():
         MODEL.half()
         logger.info("Model converted to float16 for faster inference")
 
+    # Compile the model for faster inference (first run will be slow)
+    if DEVICE == "cuda":
+        try:
+            MODEL = torch.compile(MODEL, mode="reduce-overhead")
+            logger.info("Model compiled with torch.compile")
+        except Exception as e:
+            logger.warning("torch.compile failed, continuing with uncompiled model: %s", e)
+
     MODEL_SR = MODEL.sr
     logger.info(
         "Model ready. sr=%dHz  load_time=%.1fs  total=%.1fs",
