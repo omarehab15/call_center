@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Make python3.11 the default
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python python python3 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
     && python3 -m pip install --upgrade pip
 
 # ── Python deps ────────────────────────────────────────────────────────────────
