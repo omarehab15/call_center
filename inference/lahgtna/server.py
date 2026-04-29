@@ -75,6 +75,11 @@ def load_model():
     if hasattr(MODEL, "to") and str(getattr(MODEL, "device", "")) != DEVICE:
         MODEL.to(DEVICE)
 
+    # Half-precision for faster inference (~30-50% speedup, negligible quality loss)
+    if DEVICE == "cuda" and hasattr(MODEL, "half"):
+        MODEL.half()
+        logger.info("Model converted to float16 for faster inference")
+
     MODEL_SR = MODEL.sr
     logger.info(
         "Model ready. sr=%dHz  load_time=%.1fs  total=%.1fs",
