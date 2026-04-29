@@ -16,6 +16,7 @@ from livekit.agents import (
 from livekit.plugins import silero, openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import stt as stt_module
+from livekit.agents.tts import StreamAdapter as TTSStreamAdapter
 
 logger = logging.getLogger("agent")
 
@@ -98,11 +99,13 @@ async def my_agent(ctx: JobContext):
             model=llama_model,
             api_key="no-key-needed"
         ),
-        tts=openai.TTS(
-            base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8000/v1"),
-            model="tts-1-hd",
-            voice="saudi",
-            api_key="no-key-needed"
+        tts=TTSStreamAdapter(
+            tts=openai.TTS(
+                base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8000/v1"),
+                model="tts-1-hd",
+                voice="saudi",
+                api_key="no-key-needed"
+            ),
         ),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
