@@ -83,6 +83,27 @@ async def my_agent(ctx: JobContext):
         stt_base_url,
     )
 
+    # ── TTS provider selection ────────────────────────────────────────────────
+    tts_provider = os.getenv("TTS_PROVIDER", "groq").lower()
+    tts_voice = os.getenv("TTS_VOICE", "fahad")
+
+    if tts_provider == "groq":
+        tts_instance = openai.TTS(
+            base_url="https://api.groq.com/openai/v1",
+            model="canopylabs/orpheus-arabic-saudi",
+            voice=tts_voice,
+            api_key=os.getenv("GROQ_API_KEY", ""),
+        )
+    else:  # lahgtna (self-hosted chatterbox)
+        tts_instance = openai.TTS(
+            base_url=os.getenv("LAHGTNA_BASE_URL", "http://lahgtna:8000/v1"),
+            model="tts-1-hd",
+            voice=tts_voice,
+            api_key="no-key-needed",
+        )
+
+    logger.info("TTS provider=%s voice=%s", tts_provider, tts_voice)
+
     session = AgentSession(
         stt=stt_module.StreamAdapter(
             stt=openai.STT(
@@ -100,14 +121,7 @@ async def my_agent(ctx: JobContext):
             model=llama_model,
             api_key="no-key-needed"
         ),
-        tts=TTSStreamAdapter(
-            tts=openai.TTS(
-                base_url=os.getenv("XTTS_BASE_URL", "http://xtts:8000/v1"),
-                model="tts-1-hd",
-                voice="saudi",
-                api_key="no-key-needed"
-            ),
-        ),
+        tts=TTSStreamAdapter(tts=tts_instance),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
