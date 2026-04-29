@@ -221,9 +221,30 @@ async def text_to_speech(req: SpeechRequest):
         audio_duration, elapsed, elapsed / max(audio_duration, 0.001),
     )
 
-    audio_bytes, mime_type = tensor_to_audio_bytes(wav, MODEL_SR, req.response_format)
-    return Response(
-        content=audio_bytes,
+    # Encode audio
+    wav_tensor = wav.unsqueeze(0) if wav.dim() == 1 else wav
+    wav_tensor = wav_tensor.cpu()
+    fmt = req.response_format.lower()
+
+    if fmt == "pcm":
+        pcm = (wav_tensor * 32767).clamp(-32768, 32767).short()
+        audio_bytes = pcm.numpy().tobytes()
+        mime_type = "audio/pcm"
+    else:
+        buf = io.BytesIO()
+        ta.save(buf, wav_tensor, MODEL_SR, format=fmt)
+        buf.seek(0)
+        audio_bytes = buf.read()
+        mime_type = "audio/mpeg" if fmt == "mp3" else "audio/wav"
+
+    async def stream_chunks():
+        offset = 0
+        while offset < len(audio_bytes):
+            yield audio_bytes[offset:offset + 4096]
+            offset += 4096
+
+    return StreamingResponse(
+        stream_chunks(),
         media_type=mime_type,
         headers={"Content-Disposition": f"inline; filename=speech.{req.response_format}"},
     )
