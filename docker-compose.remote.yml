@@ -27,6 +27,9 @@ services:
       - TEMPERATURE=${LAHGTNA_TEMPERATURE:-0.8}
       # Repetition penalty is important for lahgtna to avoid looping artefacts
       - REPETITION_PENALTY=${LAHGTNA_REPETITION_PENALTY:-2}
+      # Token sampling — higher MIN_P / lower TOP_P = slightly faster, less varied
+      - MIN_P=${LAHGTNA_MIN_P:-0.05}
+      - TOP_P=${LAHGTNA_TOP_P:-1.0}
     volumes:
       - lahgtna-model-cache:/model-cache
       # Reuse the same voice reference files that XTTS was using

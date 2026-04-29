@@ -41,6 +41,8 @@ EXAGGERATION       = float(os.getenv("EXAGGERATION", "0.5"))
 CFG_WEIGHT         = float(os.getenv("CFG_WEIGHT", "0.5"))
 TEMPERATURE        = float(os.getenv("TEMPERATURE", "0.8"))
 REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", "2.0"))
+MIN_P              = float(os.getenv("MIN_P", "0.05"))
+TOP_P              = float(os.getenv("TOP_P", "1.0"))
 
 # ── Global model state ────────────────────────────────────────────────────────
 MODEL    = None
@@ -79,14 +81,6 @@ def load_model():
     if DEVICE == "cuda" and hasattr(MODEL, "half"):
         MODEL.half()
         logger.info("Model converted to float16 for faster inference")
-
-    # Compile the model for faster inference (first run will be slow)
-    if DEVICE == "cuda":
-        try:
-            MODEL = torch.compile(MODEL, mode="reduce-overhead")
-            logger.info("Model compiled with torch.compile")
-        except Exception as e:
-            logger.warning("torch.compile failed, continuing with uncompiled model: %s", e)
 
     MODEL_SR = MODEL.sr
     logger.info(
@@ -168,6 +162,8 @@ class SpeechRequest(BaseModel):
     cfg_weight: float | None = None
     temperature: float | None = None
     repetition_penalty: float | None = None
+    min_p: float | None = None
+    top_p: float | None = None
 
 
 @app.get("/health")
@@ -203,6 +199,8 @@ async def text_to_speech(req: SpeechRequest):
     cfg_weight    = req.cfg_weight         if req.cfg_weight         is not None else CFG_WEIGHT
     temperature   = req.temperature        if req.temperature        is not None else TEMPERATURE
     rep_penalty   = req.repetition_penalty if req.repetition_penalty is not None else REPETITION_PENALTY
+    min_p         = req.min_p              if req.min_p              is not None else MIN_P
+    top_p         = req.top_p             if req.top_p              is not None else TOP_P
 
     # ── Generate — exactly as the Colab notebook does ──────────────────────────
     t0 = time.time()
@@ -213,6 +211,8 @@ async def text_to_speech(req: SpeechRequest):
             cfg_weight=cfg_weight,
             temperature=temperature,
             repetition_penalty=rep_penalty,
+            min_p=min_p,
+            top_p=top_p,
         )
         if voice_file:
             generate_kwargs["audio_prompt_path"] = voice_file
