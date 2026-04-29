@@ -97,7 +97,7 @@ Set these in `.env.remote` to tune the output for your call-center use case:
 | `LAHGTNA_EXAGGERATION` | `0.5` | Emotional intensity — try `0.3` for calm professional tone |
 | `LAHGTNA_CFG_WEIGHT` | `0.5` | Voice adherence — higher = closer to reference file |
 | `LAHGTNA_TEMPERATURE` | `0.8` | Randomness — lower = more consistent delivery |
-| `LAHGTNA_REPETITION_PENALTY` | `1.2` | **Don't lower below 1.1** — prevents syllable looping |
+| `LAHGTNA_REPETITION_PENALTY` | `2` | **Don't lower below 1.1** — prevents syllable looping |
 
 ### First-boot model download
 
@@ -145,7 +145,7 @@ The `/health` endpoint returns `{"status": "ok"}` once the model is ready.
 
 ### Audio has looping/repetition artefacts
 
-Increase `LAHGTNA_REPETITION_PENALTY` to `1.3` or `1.4` in `.env.remote` and restart:
+Increase `LAHGTNA_REPETITION_PENALTY` to `2` in `.env.remote` and restart:
 ```bash
 docker compose -f docker-compose.remote.yml restart lahgtna
 ```

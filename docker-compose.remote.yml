@@ -26,7 +26,7 @@ services:
       - CFG_WEIGHT=${LAHGTNA_CFG_WEIGHT:-0.5}
       - TEMPERATURE=${LAHGTNA_TEMPERATURE:-0.8}
       # Repetition penalty is important for lahgtna to avoid looping artefacts
-      - REPETITION_PENALTY=${LAHGTNA_REPETITION_PENALTY:-1.2}
+      - REPETITION_PENALTY=${LAHGTNA_REPETITION_PENALTY:-2}
     volumes:
       - lahgtna-model-cache:/model-cache
       # Reuse the same voice reference files that XTTS was using
