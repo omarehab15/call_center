@@ -44,8 +44,8 @@ DEFAULT_VOICE_FILE = os.getenv("DEFAULT_VOICE_FILE", "")  # fallback if no match
 EXAGGERATION = float(os.getenv("EXAGGERATION", "0.5"))
 CFG_WEIGHT = float(os.getenv("CFG_WEIGHT", "0.5"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.8"))
-REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", "1.2"))  # lahgtna needs this
-LANGUAGE_ID = os.getenv("LANGUAGE_ID", "ar")
+REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", "2.0"))  # notebook uses 2
+LANGUAGE_ID = os.getenv("LANGUAGE_ID", "sa")
 
 # ─────────────────────────────────────────────
 # Global model state
@@ -300,59 +300,38 @@ async def text_to_speech(req: SpeechRequest):
     temperature = req.temperature if req.temperature is not None else TEMPERATURE
     rep_penalty = req.repetition_penalty if req.repetition_penalty is not None else REPETITION_PENALTY
 
-    # Chatterbox processes up to the first sentence boundary internally and
-    # returns only that chunk when given multi-clause text. We split the text
-    # ourselves, generate each chunk, and concatenate — guaranteeing the full
-    # response is always spoken.
-    sentences = split_sentences(text)
-    logger.info("Generating %d chunk(s) for %d chars", len(sentences), len(text))
-
+    # Pass the full text directly — matches the notebook pattern exactly.
+    # Chatterbox handles full sentences fine; splitting degrades quality.
     t0 = time.time()
-    chunks: list[torch.Tensor] = []
     try:
-        base_kwargs = dict(
+        generate_kwargs = dict(
             language_id=LANGUAGE_ID,
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
             temperature=temperature,
+            repetition_penalty=rep_penalty,
         )
         if voice_file:
-            base_kwargs["audio_prompt_path"] = voice_file
+            generate_kwargs["audio_prompt_path"] = voice_file
 
-        for sentence in sentences:
-            if not sentence.strip():
-                continue
-            generate_kwargs = {**base_kwargs, "text": sentence}
-            try:
-                generate_kwargs["repetition_penalty"] = rep_penalty
-                wav_chunk = MODEL.generate(**generate_kwargs)
-            except TypeError:
-                del generate_kwargs["repetition_penalty"]
-                wav_chunk = MODEL.generate(**generate_kwargs)
+        wav = MODEL.generate(text, **generate_kwargs)
 
-            # Normalise shape to (1, samples) before collecting
-            if wav_chunk.dim() == 1:
-                wav_chunk = wav_chunk.unsqueeze(0)
-            chunks.append(wav_chunk)
+    except TypeError:
+        # Fallback: older chatterbox without repetition_penalty
+        generate_kwargs.pop("repetition_penalty", None)
+        wav = MODEL.generate(text, **generate_kwargs)
 
     except Exception as exc:
         logger.exception("Generation failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {exc}")
 
-    if not chunks:
-        raise HTTPException(status_code=500, detail="No audio generated")
-
-    # Concatenate all sentence chunks into one continuous waveform
-    wav = torch.cat(chunks, dim=-1)
-
     elapsed = time.time() - t0
     audio_duration = wav.shape[-1] / MODEL_SR
     logger.info(
-        "Generated %.2fs audio in %.2fs (RTF %.2f) [%d chunks]",
+        "Generated %.2fs audio in %.2fs (RTF %.2f)",
         audio_duration,
         elapsed,
         elapsed / max(audio_duration, 0.001),
-        len(chunks),
     )
 
     audio_bytes, mime_type = tensor_to_audio_bytes(wav, MODEL_SR, req.response_format)
