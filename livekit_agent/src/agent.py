@@ -15,6 +15,7 @@ from livekit.agents import (
 )
 from livekit.plugins import silero, openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from livekit.agents import stt as stt_module
 
 logger = logging.getLogger("agent")
 
@@ -81,12 +82,15 @@ async def my_agent(ctx: JobContext):
     )
 
     session = AgentSession(
-        stt=openai.STT(
-            base_url=stt_base_url,
-            # base_url="http://localhost:11435/v1", # uncomment for local testing
-            model=stt_model,
-            api_key=stt_api_key,
-            language="ar"
+        stt=stt_module.StreamAdapter(
+            stt=openai.STT(
+                base_url=stt_base_url,
+                # base_url="http://localhost:11435/v1", # uncomment for local testing
+                model=stt_model,
+                api_key=stt_api_key,
+                language="ar"
+            ),
+            vad=ctx.proc.userdata["vad"],
         ),
         llm=openai.LLM(
             base_url=llama_base_url,
