@@ -205,6 +205,30 @@ def tensor_to_audio_bytes(
     return buf.read(), mime
 
 
+import re
+
+# Splits Arabic/mixed text on sentence boundaries.
+# Both the non-streaming and streaming endpoints use this so that chatterbox
+# never receives multi-clause text — it only reliably generates up to the first
+# sentence boundary internally.
+SENTENCE_ENDINGS = re.compile(r'(?<=[.!?،؟])\s+')
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split Arabic/mixed text on sentence boundaries."""
+    parts = SENTENCE_ENDINGS.split(text.strip())
+    result = []
+    buf = ""
+    for part in parts:
+        buf = (buf + " " + part).strip() if buf else part
+        if len(buf) >= 20:  # only emit chunks long enough to sound natural
+            result.append(buf)
+            buf = ""
+    if buf:
+        result.append(buf)
+    return result or [text]
+
+
 # ─────────────────────────────────────────────
 # FastAPI app
 # ─────────────────────────────────────────────
@@ -276,40 +300,59 @@ async def text_to_speech(req: SpeechRequest):
     temperature = req.temperature if req.temperature is not None else TEMPERATURE
     rep_penalty = req.repetition_penalty if req.repetition_penalty is not None else REPETITION_PENALTY
 
+    # Chatterbox processes up to the first sentence boundary internally and
+    # returns only that chunk when given multi-clause text. We split the text
+    # ourselves, generate each chunk, and concatenate — guaranteeing the full
+    # response is always spoken.
+    sentences = split_sentences(text)
+    logger.info("Generating %d chunk(s) for %d chars", len(sentences), len(text))
+
     t0 = time.time()
+    chunks: list[torch.Tensor] = []
     try:
-        generate_kwargs = dict(
-            text=text,
+        base_kwargs = dict(
             language_id=LANGUAGE_ID,
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
             temperature=temperature,
         )
-
-        # Voice cloning: pass reference audio if available
         if voice_file:
-            generate_kwargs["audio_prompt_path"] = voice_file
+            base_kwargs["audio_prompt_path"] = voice_file
 
-        # repetition_penalty: supported in mtl_tts.generate if the model exposes it
-        try:
-            generate_kwargs["repetition_penalty"] = rep_penalty
-            wav = MODEL.generate(**generate_kwargs)
-        except TypeError:
-            # Older chatterbox versions may not have repetition_penalty
-            del generate_kwargs["repetition_penalty"]
-            wav = MODEL.generate(**generate_kwargs)
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+            generate_kwargs = {**base_kwargs, "text": sentence}
+            try:
+                generate_kwargs["repetition_penalty"] = rep_penalty
+                wav_chunk = MODEL.generate(**generate_kwargs)
+            except TypeError:
+                del generate_kwargs["repetition_penalty"]
+                wav_chunk = MODEL.generate(**generate_kwargs)
+
+            # Normalise shape to (1, samples) before collecting
+            if wav_chunk.dim() == 1:
+                wav_chunk = wav_chunk.unsqueeze(0)
+            chunks.append(wav_chunk)
 
     except Exception as exc:
         logger.exception("Generation failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {exc}")
 
+    if not chunks:
+        raise HTTPException(status_code=500, detail="No audio generated")
+
+    # Concatenate all sentence chunks into one continuous waveform
+    wav = torch.cat(chunks, dim=-1)
+
     elapsed = time.time() - t0
     audio_duration = wav.shape[-1] / MODEL_SR
     logger.info(
-        "Generated %.2fs audio in %.2fs (RTF %.2f)",
+        "Generated %.2fs audio in %.2fs (RTF %.2f) [%d chunks]",
         audio_duration,
         elapsed,
         elapsed / max(audio_duration, 0.001),
+        len(chunks),
     )
 
     audio_bytes, mime_type = tensor_to_audio_bytes(wav, MODEL_SR, req.response_format)
@@ -329,26 +372,6 @@ async def text_to_speech(req: SpeechRequest):
 # LiveKit doesn't use this directly, but useful
 # for testing and future integrations.
 # ─────────────────────────────────────────────
-
-SENTENCE_ENDINGS = re.compile(r'(?<=[.!?،؟])\s+')
-
-import re
-
-
-def split_sentences(text: str) -> list[str]:
-    """Split Arabic/mixed text on sentence boundaries."""
-    parts = SENTENCE_ENDINGS.split(text.strip())
-    # Filter empty, recombine very short fragments
-    result = []
-    buf = ""
-    for part in parts:
-        buf = (buf + " " + part).strip() if buf else part
-        if len(buf) >= 20:  # only emit chunks long enough to sound natural
-            result.append(buf)
-            buf = ""
-    if buf:
-        result.append(buf)
-    return result or [text]
 
 
 @app.post("/v1/audio/speech/stream")
