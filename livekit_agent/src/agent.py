@@ -93,6 +93,7 @@ async def my_agent(ctx: JobContext):
             model="canopylabs/orpheus-arabic-saudi",
             voice=tts_voice,
             api_key=os.getenv("GROQ_API_KEY", ""),
+            response_format="wav",  # Groq Orpheus only supports wav
         )
     else:  # lahgtna (self-hosted chatterbox)
         tts_instance = openai.TTS(
