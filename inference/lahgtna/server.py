@@ -17,6 +17,7 @@ import io
 import logging
 import os
 import time
+import re
 from contextlib import asynccontextmanager
 
 import torch
@@ -44,6 +45,7 @@ EXAGGERATION = float(os.getenv("EXAGGERATION", "0.5"))
 CFG_WEIGHT = float(os.getenv("CFG_WEIGHT", "0.5"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.8"))
 REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", "1.2"))  # lahgtna needs this
+LANGUAGE_ID = os.getenv("LANGUAGE_ID", "ar")
 
 # ─────────────────────────────────────────────
 # Global model state
@@ -254,6 +256,7 @@ async def text_to_speech(req: SpeechRequest):
     try:
         generate_kwargs = dict(
             text=text,
+            language_id=LANGUAGE_ID,
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
             temperature=temperature,
@@ -350,6 +353,7 @@ async def text_to_speech_stream(req: SpeechRequest):
             try:
                 kwargs = dict(
                     text=sentence,
+                    language_id=LANGUAGE_ID,
                     exaggeration=exaggeration,
                     cfg_weight=cfg_weight,
                     temperature=temperature,
