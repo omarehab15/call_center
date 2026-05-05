@@ -38,8 +38,8 @@ Once it's up, visit [http://localhost:3000](http://localhost:3000) in your brows
 ### Notes on models and resources
 
 - The LLM runs via `llama-server` and auto-downloads from Hugging Face on first boot (no manual model download needed).
-- The default repo is `unsloth/Qwen3-4B-Instruct-2507-GGUF` (change `LLAMA_HF_REPO` to use a different model or quant).
-- The API exposes the model under an alias (default `qwen3-4b` via `LLAMA_MODEL_ALIAS`); the agent uses that via `LLAMA_MODEL`.
+- The default repo is `unsloth/gemma-4-26B-A4B-it-GGUF` (change `LLAMA_HF_REPO` to use a different model or quant).
+- The API exposes the model under an alias (default `gemma-4-26b` via `LLAMA_MODEL_ALIAS`); the agent uses that via `LLAMA_MODEL`.
 - STT defaults to Nemotron (`NEMOTRON_MODEL_NAME`, `NEMOTRON_MODEL_ID`, `STT_*` env vars).
 - If you switch to Whisper fallback, configure `VOXBOX_HF_REPO_ID` and run compose with `--profile whisper`.
 - You can swap out the LLM/STT/TTS URLs to use cloud models if you want (see `livekit_agent/src/agent.py`).
@@ -99,7 +99,7 @@ The frontend only signs tokens; it does not connect to LiveKit directly. The bro
 
 The Compose stack runs `llama-server` with `--hf-repo` so models are fetched automatically and cached on disk:
 
-- `LLAMA_HF_REPO`: Hugging Face repo, optionally with `:quant` (e.g. `unsloth/Qwen3-4B-Instruct-2507-GGUF:q4_k_m`)
+- `LLAMA_HF_REPO`: Hugging Face repo, optionally with `:quant` (e.g. `unsloth/gemma-4-26B-A4B-it-GGUF:q4_k_m`)
 - `LLAMA_MODEL_ALIAS`: Name exposed via the API (and returned from `/v1/models`)
 - `LLAMA_MODEL`: What the agent requests (should match `LLAMA_MODEL_ALIAS`)
 - `LLAMA_BASE_URL`: LLM base URL for the agent (default `http://llama_cpp:11434/v1`)

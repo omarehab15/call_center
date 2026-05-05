@@ -158,7 +158,7 @@ Lower `LAHGTNA_EXAGGERATION` to `0.3` and lower `LAHGTNA_CFG_WEIGHT` to `0.3` â€
 
 All three models (lahgtna ~4GB, Whisper ~3GB, llama.cpp ~18GB) together need ~25GB VRAM. If you're on a smaller GPU:
 - Reduce `LLAMA_N_GPU_LAYERS` in `.env.remote` to offload some LLM layers to CPU RAM
-- Or run a smaller LLM (e.g. `unsloth/Qwen3-4B-Instruct-2507-GGUF`)
+- Or run a smaller LLM (e.g. `unsloth/gemma-4-26B-A4B-it-GGUF`)
 
 ### WebRTC not connecting
 

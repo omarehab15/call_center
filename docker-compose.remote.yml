@@ -67,11 +67,11 @@ services:
       - --port
       - "11434"
       - --hf-repo
-      - "${LLAMA_HF_REPO:-unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF}"
+      - "${LLAMA_HF_REPO:-unsloth/gemma-4-26B-A4B-it-GGUF}"
       - --hf-file
-      - "${LLAMA_HF_FILE:-Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf}"
+      - "${LLAMA_HF_FILE:-gemma-4-26B-A4B-it-UD-Q4_K_M.gguf}"
       - --alias
-      - "${LLAMA_MODEL_ALIAS:-qwen3-30b}"
+      - "${LLAMA_MODEL_ALIAS:-gemma-4-26b}"
       - --ctx-size
       - "${LLAMA_CTX_SIZE:-16384}"
     ports:

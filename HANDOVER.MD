@@ -30,7 +30,7 @@ The two machines are connected via **Tailscale**. The agent on the local machine
 ```
 User speaks
   → Whisper STT (h2oai/faster-whisper-large-v3-turbo)
-  → Qwen3-30B LLM (via llama.cpp)
+  → gemma-4-26B LLM (via llama.cpp)
   → lahgtna-chatterbox TTS (oddadmix/lahgtna-chatterbox-v1)
   → Audio back to user via WebRTC
 ```
@@ -121,7 +121,7 @@ Services and ports:
 |---|---|---|
 | `lahgtna` | 8880 | TTS (lahgtna-chatterbox) |
 | `whisper` | 11435 | STT (faster-whisper) |
-| `llama_cpp` | 11436 | LLM (Qwen3-30B) |
+| `llama_cpp` | 11436 | LLM (gemma-4-26B) |
 
 ### Local machine
 
@@ -160,7 +160,7 @@ STT_MODEL=h2oai/faster-whisper-large-v3-turbo
 STT_API_KEY=no-key-needed
 
 LLAMA_BASE_URL=http://100.x.x.x:11436/v1
-LLAMA_MODEL=qwen3-30b
+LLAMA_MODEL=gemma-4-26b
 
 XTTS_BASE_URL=http://100.x.x.x:8880/v1   # points at lahgtna
 ```
@@ -168,9 +168,9 @@ XTTS_BASE_URL=http://100.x.x.x:8880/v1   # points at lahgtna
 ### `.env.remote` (vast.ai machine)
 
 ```env
-LLAMA_HF_REPO=unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF
-LLAMA_HF_FILE=Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
-LLAMA_MODEL_ALIAS=qwen3-30b
+LLAMA_HF_REPO=unsloth/gemma-4-26B-A4B-it-GGUF
+LLAMA_HF_FILE=gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+LLAMA_MODEL_ALIAS=gemma-4-26b
 LLAMA_HOST_PORT=11436
 LLAMA_CTX_SIZE=16384
 
@@ -230,7 +230,7 @@ Observed latency breakdown:
 - `LLAMA_ARG_FLASH_ATTN=1` is already set (good)
 - `LLAMA_N_GPU_LAYERS=-1` offloads all layers to GPU (good)
 - Consider speculative decoding if the model supports it
-- Consider a smaller model (Qwen3-14B or Qwen3-7B) for faster first token
+- Consider a smaller model for faster first token
 
 **TTS starting points:**
 - Sentence-level streaming: split on `.` `!` `?` `؟` only (not `،`), generate per sentence, stream audio chunks as they complete. This reduces perceived latency by getting audio out before the full response is synthesized.
@@ -250,7 +250,7 @@ Change `LLAMA_HF_REPO` and `LLAMA_HF_FILE` in `.env.remote` and `LLAMA_MODEL` / 
 |---|---|
 | lahgtna-chatterbox | ~4–5 GB |
 | faster-whisper-large-v3-turbo | ~3 GB |
-| Qwen3-30B Q4_K_M | ~18–20 GB |
+| gemma-4-26B Q4_K_M | ~18–20 GB |
 | **Total** | **~25–28 GB** |
 
 Minimum recommended GPU: RTX 3090 (24GB) with some CPU offload for LLM, or A6000/A100 (48GB) for full GPU offload.
