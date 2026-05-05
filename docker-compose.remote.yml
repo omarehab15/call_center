@@ -40,7 +40,7 @@ services:
       - --n-gpu-layers
       - "999"
       - --batch-size
-      - "512"
+      - "1024"
       - --threads
       - "8"
       - --flash-attn
