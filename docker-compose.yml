@@ -69,7 +69,6 @@ services:
       - "${LLAMA_MODEL_ALIAS:-gemma-4-26b}"
       - --ctx-size
       - "${LLAMA_CTX_SIZE:-16384}"
-      - --flash-attn
     ports:
       - "${LLAMA_HOST_PORT:-11436}:11434"
     volumes:
