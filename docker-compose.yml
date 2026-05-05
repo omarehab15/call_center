@@ -46,7 +46,7 @@ services:
     volumes:
       - whisper-data:/data
     environment:
-      - VOXBOX_HF_REPO_ID=${VOXBOX_HF_REPO_ID:-Systran/faster-whisper-small}
+      - VOXBOX_HF_REPO_ID=${VOXBOX_HF_REPO_ID:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
       - VOXBOX_DEVICE=${VOXBOX_DEVICE:-cpu}
       - DATA_DIR=/data
     ports:

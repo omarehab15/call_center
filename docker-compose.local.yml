@@ -29,7 +29,7 @@ services:
       # Remote model endpoints (via Tailscale)
       - STT_PROVIDER=${STT_PROVIDER:-whisper}
       - STT_BASE_URL=${STT_BASE_URL}
-      - STT_MODEL=${STT_MODEL:-h2oai/faster-whisper-large-v3-turbo}
+      - STT_MODEL=${STT_MODEL:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
       - STT_API_KEY=${STT_API_KEY:-no-key-needed}
       - LLAMA_BASE_URL=${LLAMA_BASE_URL}
       - LLAMA_MODEL=${LLAMA_MODEL:-gemma-4-26b}

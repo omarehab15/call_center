@@ -29,7 +29,7 @@ The two machines are connected via **Tailscale**. The agent on the local machine
 ### Pipeline per voice turn
 ```
 User speaks
-  → Whisper STT (h2oai/faster-whisper-large-v3-turbo)
+  → Whisper STT (dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8)
   → gemma-4-26B LLM (via llama.cpp)
   → lahgtna-chatterbox TTS (oddadmix/lahgtna-chatterbox-v1)
   → Audio back to user via WebRTC
@@ -156,7 +156,7 @@ LIVEKIT_API_SECRET=secret
 
 STT_PROVIDER=whisper
 STT_BASE_URL=http://100.x.x.x:11435/v1
-STT_MODEL=h2oai/faster-whisper-large-v3-turbo
+STT_MODEL=dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8
 STT_API_KEY=no-key-needed
 
 LLAMA_BASE_URL=http://100.x.x.x:11436/v1
@@ -174,7 +174,7 @@ LLAMA_MODEL_ALIAS=gemma-4-26b
 LLAMA_HOST_PORT=11436
 LLAMA_CTX_SIZE=16384
 
-VOXBOX_HF_REPO_ID=h2oai/faster-whisper-large-v3-turbo
+VOXBOX_HF_REPO_ID=dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8
 
 LAHGTNA_HF_REPO=oddadmix/lahgtna-chatterbox-v1
 LAHGTNA_HOST_PORT=8880

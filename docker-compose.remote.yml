@@ -14,7 +14,7 @@ services:
     volumes:
       - whisper-cache:/data
     environment:
-      - VOXBOX_HF_REPO_ID=${VOXBOX_HF_REPO_ID:-h2oai/faster-whisper-large-v3-turbo}
+      - VOXBOX_HF_REPO_ID=${VOXBOX_HF_REPO_ID:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
     ports:
       - "11435:80"
     restart: unless-stopped
