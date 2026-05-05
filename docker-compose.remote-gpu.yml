@@ -1,14 +1,7 @@
 # GPU overlay for docker-compose.remote.yml
 # Use with: docker compose -f docker-compose.remote.yml -f docker-compose.remote-gpu.yml up
 services:
-  lahgtna:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+
 
   llama_cpp:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda

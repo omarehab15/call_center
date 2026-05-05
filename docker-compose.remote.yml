@@ -3,44 +3,7 @@
 # All endpoints are OpenAI-compatible and exposed on 0.0.0.0 for Tailscale access
 
 services:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # TTS — lahgtna-chatterbox-v1
-  # Saudi Arabic fine-tune of ResembleAI Chatterbox (flow-matching diffusion TTS)
-  # OpenAI-compatible: POST /v1/audio/speech  (same contract as XTTS was using)
-  # ─────────────────────────────────────────────────────────────────────────────
-  lahgtna:
-    build:
-      context: ./inference/lahgtna
-      args:
-        BASE_IMAGE: ${LAHGTNA_BASE_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
-    ports:
-      - "${LAHGTNA_HOST_PORT:-8880}:8000"
-    environment:
-      - DEVICE=${LAHGTNA_DEVICE:-cuda}
-      - HF_MODEL_REPO=${LAHGTNA_HF_REPO:-oddadmix/lahgtna-chatterbox-v1}
-      - VOICES_DIR=/voices
-      - HF_HOME=/model-cache
-      - HUGGINGFACE_HUB_CACHE=/model-cache
-      # Generation tuning — tweak these for better Saudi Arabic output
-      - EXAGGERATION=${LAHGTNA_EXAGGERATION:-0.5}
-      - CFG_WEIGHT=${LAHGTNA_CFG_WEIGHT:-0.5}
-      - TEMPERATURE=${LAHGTNA_TEMPERATURE:-0.8}
-      # Repetition penalty is important for lahgtna to avoid looping artefacts
-      - REPETITION_PENALTY=${LAHGTNA_REPETITION_PENALTY:-2}
-      # Token sampling — higher MIN_P / lower TOP_P = slightly faster, less varied
-      - MIN_P=${LAHGTNA_MIN_P:-0.05}
-      - TOP_P=${LAHGTNA_TOP_P:-1.0}
-    volumes:
-      - lahgtna-model-cache:/model-cache
-      # Reuse the same voice reference files that XTTS was using
-      - ./inference/xtts/voices:/voices:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health > /dev/null"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 300s  # first boot downloads ~4GB of model weights
+
 
   # ─────────────────────────────────────────────────────────────────────────────
   # STT — Whisper (via VoxBox)
@@ -90,4 +53,3 @@ services:
 
 volumes:
   whisper-cache:
-  lahgtna-model-cache:

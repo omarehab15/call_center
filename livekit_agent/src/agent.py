@@ -83,27 +83,17 @@ async def my_agent(ctx: JobContext):
         stt_base_url,
     )
 
-    # ── TTS provider selection ────────────────────────────────────────────────
-    tts_provider = os.getenv("TTS_PROVIDER", "groq").lower()
     tts_voice = os.getenv("TTS_VOICE", "fahad")
 
-    if tts_provider == "groq":
-        tts_instance = openai.TTS(
-            base_url="https://api.groq.com/openai/v1",
-            model="canopylabs/orpheus-arabic-saudi",
-            voice=tts_voice,
-            api_key=os.getenv("GROQ_API_KEY", ""),
-            response_format="wav",  # Groq Orpheus only supports wav
-        )
-    else:  # lahgtna (self-hosted chatterbox)
-        tts_instance = openai.TTS(
-            base_url=os.getenv("LAHGTNA_BASE_URL", "http://lahgtna:8000/v1"),
-            model="tts-1-hd",
-            voice=tts_voice,
-            api_key="no-key-needed",
-        )
+    tts_instance = openai.TTS(
+        base_url="https://api.groq.com/openai/v1",
+        model="canopylabs/orpheus-arabic-saudi",
+        voice=tts_voice,
+        api_key=os.getenv("GROQ_API_KEY", ""),
+        response_format="wav",  # Groq Orpheus only supports wav
+    )
 
-    logger.info("TTS provider=%s voice=%s", tts_provider, tts_voice)
+    logger.info("TTS voice=%s", tts_voice)
 
     session = AgentSession(
         stt=stt_module.StreamAdapter(

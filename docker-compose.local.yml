@@ -33,7 +33,7 @@ services:
       - STT_API_KEY=${STT_API_KEY:-no-key-needed}
       - LLAMA_BASE_URL=${LLAMA_BASE_URL}
       - LLAMA_MODEL=${LLAMA_MODEL:-gemma-4-26b}
-      - XTTS_BASE_URL=${XTTS_BASE_URL}
+
     depends_on:
       livekit:
         condition: service_started

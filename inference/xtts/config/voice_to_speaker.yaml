@@ -1,5 +1,0 @@
-tts-1-hd:
-  fahad:
-    model: xtts
-    speaker: voices/Fasseh-fahad.wav
-    language: ar
