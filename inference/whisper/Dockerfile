@@ -23,4 +23,4 @@ WORKDIR /app
 
 ENV DATA_DIR=/data
 
-CMD ["sh", "-c", "vox-box start --huggingface-repo-id ${VOXBOX_HF_REPO_ID:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8} --data-dir ${DATA_DIR} --device ${VOXBOX_DEVICE:-cpu}"]
+CMD ["sh", "-c", "vox-box start --huggingface-repo-id ${VOXBOX_HF_REPO_ID:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8} --data-dir ${DATA_DIR} --device ${VOXBOX_DEVICE:-cpu} --compute-type int8"]
