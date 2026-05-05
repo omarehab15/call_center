@@ -12,9 +12,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    environment:
-      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_N_GPU_LAYERS:--1}
-      - LLAMA_ARG_FLASH_ATTN=1
+
 
   whisper:
     environment:

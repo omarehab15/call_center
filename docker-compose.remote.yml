@@ -36,7 +36,15 @@ services:
       - --alias
       - "${LLAMA_MODEL_ALIAS:-gemma-4-26b}"
       - --ctx-size
-      - "${LLAMA_CTX_SIZE:-16384}"
+      - "${LLAMA_CTX_SIZE:-8192}"
+      - --n-gpu-layers
+      - "999"
+      - --batch-size
+      - "512"
+      - --threads
+      - "8"
+      - --flash-attn
+      - "on"
     ports:
       - "${LLAMA_HOST_PORT:-11436}:11434"
     volumes:
