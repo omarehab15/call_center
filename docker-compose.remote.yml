@@ -1,9 +1,9 @@
 # docker-compose.remote.yml — Run on the vast.ai GPU machine
-# Serves STT (Whisper), LLM (llama.cpp), and TTS (lahgtna-chatterbox) over HTTP
+# Serves STT (Whisper) and LLM (llama.cpp / ALLaM-7B) over HTTP
 # All endpoints are OpenAI-compatible and exposed on 0.0.0.0 for Tailscale access
+# TTS is handled by a cloud provider (e.g. Groq Orpheus / ElevenLabs)
 
 services:
-
 
   # ─────────────────────────────────────────────────────────────────────────────
   # STT — Whisper (via VoxBox)
@@ -20,7 +20,13 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # LLM — llama.cpp
+  # LLM — llama.cpp / ALLaM-7B-Instruct
+  #
+  # VRAM budget on RTX 5090 (32GB):
+  #   Q8_0 weights        ~7.4 GB
+  #   KV cache (q8_0)     ~8.0 GB  (16 slots × 4096 ctx)
+  #   ─────────────────────────────
+  #   Total               ~15.4 GB  →  ~16 GB headroom remaining
   # ─────────────────────────────────────────────────────────────────────────────
   llama_cpp:
     image: ghcr.io/ggml-org/llama.cpp:server
@@ -30,21 +36,27 @@ services:
       - --port
       - "11434"
       - --hf-repo
-      - "${LLAMA_HF_REPO:-unsloth/gemma-4-26B-A4B-it-GGUF}"
+      - "${LLAMA_HF_REPO:-bartowski/ALLaM-AI_ALLaM-7B-Instruct-preview-GGUF}"
       - --hf-file
-      - "${LLAMA_HF_FILE:-gemma-4-26B-A4B-it-UD-Q4_K_M.gguf}"
+      - "${LLAMA_HF_FILE:-ALLaM-AI_ALLaM-7B-Instruct-preview-Q8_0.gguf}"
       - --alias
-      - "${LLAMA_MODEL_ALIAS:-gemma-4-26b}"
+      - "${LLAMA_MODEL_ALIAS:-allam-7b}"
       - --ctx-size
-      - "${LLAMA_CTX_SIZE:-8192}"
+      - "${LLAMA_CTX_SIZE:-4096}"
       - --n-gpu-layers
       - "999"
       - --batch-size
-      - "1024"
+      - "2048"
       - --threads
       - "8"
       - --flash-attn
       - "on"
+      - --parallel
+      - "${LLAMA_PARALLEL:-16}"        # 16 slots — 7B is small enough to afford this
+      - --cache-type-k
+      - "q8_0"                         # quantize KV cache → halves KV VRAM cost
+      - --cache-type-v
+      - "q8_0"
     ports:
       - "${LLAMA_HOST_PORT:-11436}:11434"
     volumes:
