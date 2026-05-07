@@ -22,11 +22,14 @@ services:
   # ─────────────────────────────────────────────────────────────────────────────
   # LLM — llama.cpp / ALLaM-7B-Instruct
   #
-  # VRAM budget on RTX 5090 (32GB):
-  #   Q8_0 weights        ~7.4 GB
-  #   KV cache (q8_0)     ~8.0 GB  (16 slots × 4096 ctx)
+  # VRAM budget on RTX 5090 (32 GB):
+  #   Q6_K_L weights      ~5.9 GB
+  #   KV cache (q8_0)     ~12.0 GB  (12 slots × 4096 ctx × ~1 GB/slot)
+  #   Whisper STT         ~3.0 GB
   #   ─────────────────────────────
-  #   Total               ~15.4 GB  →  ~16 GB headroom remaining
+  #   Total               ~21 GB  →  ~11 GB headroom remaining
+  #
+  # ctx-size = 4096 × parallel → each slot gets the model's full 4K context
   # ─────────────────────────────────────────────────────────────────────────────
   llama_cpp:
     image: ghcr.io/ggml-org/llama.cpp:server
@@ -38,11 +41,11 @@ services:
       - --hf-repo
       - "${LLAMA_HF_REPO:-bartowski/ALLaM-AI_ALLaM-7B-Instruct-preview-GGUF}"
       - --hf-file
-      - "${LLAMA_HF_FILE:-ALLaM-AI_ALLaM-7B-Instruct-preview-Q8_0.gguf}"
+      - "${LLAMA_HF_FILE:-ALLaM-AI_ALLaM-7B-Instruct-preview-Q6_K_L.gguf}"
       - --alias
       - "${LLAMA_MODEL_ALIAS:-allam-7b}"
       - --ctx-size
-      - "${LLAMA_CTX_SIZE:-4096}"
+      - "${LLAMA_CTX_SIZE:-49152}"   # 4096 × 12 slots
       - --n-gpu-layers
       - "999"
       - --batch-size
@@ -52,7 +55,7 @@ services:
       - --flash-attn
       - "on"
       - --parallel
-      - "${LLAMA_PARALLEL:-16}"        # 16 slots — 7B is small enough to afford this
+      - "${LLAMA_PARALLEL:-12}"         # 12 slots × 4096 ctx = full context per call
       - --cache-type-k
       - "q8_0"                         # quantize KV cache → halves KV VRAM cost
       - --cache-type-v

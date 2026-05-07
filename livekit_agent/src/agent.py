@@ -61,7 +61,7 @@ async def my_agent(ctx: JobContext):
         "room": ctx.room.name,
     }
 
-    llama_model = os.getenv("LLAMA_MODEL", "gemma-4-26b")
+    llama_model = os.getenv("LLAMA_MODEL", "allam-7b")
     llama_base_url = os.getenv("LLAMA_BASE_URL", "http://llama_cpp:11434/v1")
 
     stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
