@@ -7,6 +7,9 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
+    AudioConfig,
     JobContext,
     JobProcess,
     cli,
@@ -118,12 +121,17 @@ async def my_agent(ctx: JobContext):
         preemptive_generation=True,
     )
 
+    await ctx.connect()
+
+    background_audio = BackgroundAudioPlayer(
+        ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.5),
+    )
+    await background_audio.start(room=ctx.room, agent_session=session)
+
     await session.start(
         agent=Assistant(),
         room=ctx.room,
     )
-
-    await ctx.connect()
 
 if __name__ == "__main__":
     cli.run_app(server)
