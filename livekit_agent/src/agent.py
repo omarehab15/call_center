@@ -26,30 +26,53 @@ logger = logging.getLogger("agent")
 load_dotenv(".env.local")
 
 class Assistant(Agent):
-    def __init__(self) -> None:
+    def __init__(self, call_id: str = "local_call") -> None:
+        self.call_id = call_id
+        self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
+        أجب دائماً بلهجة سعودية نجدية بشكل مباشر وواضح.
+        قصّر إجاباتك قدر الإمكان — جملة أو جملتين كحد أقصى في معظم الأحيان.
+        لا تستخدم تنسيقات أو رموز أو نجمات أو مقدمات فارغة مثل "بالتأكيد" أو "حسناً".
+        كن ودوداً ومباشراً.
+        
+        تعليمات هامة جداً:
+        إذا ذكر المستخدم اسمه أو مشكلته، **يجب** عليك استخدام أداة `add_note` فوراً لحفظ هذه المعلومات في ذاكرتك."""
         super().__init__(
-            instructions="""أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
-            أجب دائماً بلهجة سعودية نجدية بشكل مباشر وواضح.
-            قصّر إجاباتك قدر الإمكان — جملة أو جملتين كحد أقصى في معظم الأحيان.
-            لا تستخدم تنسيقات أو رموز أو نجمات أو مقدمات فارغة مثل "بالتأكيد" أو "حسناً".
-            كن ودوداً ومباشراً.""",
+            instructions=self.base_instructions,
         )
+        self.notes = []
 
     @function_tool()
-    async def multiply_numbers(
+    async def add_note(
         self,
         context: RunContext,
-        number1: int,
-        number2: int,
-    ) -> dict[str, Any]:
-        """اضرب رقمين.
+        note: str,
+    ) -> str:
+        """استخدم هذه الأداة لحفظ ملاحظة مهمة (مثلاً اسم المتصل، أو المشاكل التي يواجهها) لتتذكرها طوال المكالمة.
         
         Args:
-            number1: الرقم الأول للضرب.
-            number2: الرقم الثاني للضرب.
+            note: الملاحظة المراد حفظها. يجب أن تكون واضحة ومباشرة.
         """
+        logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
+        self.notes.append(note)
+        
+        # Debug: write to file in the same directory as agent.py
+        debug_path = os.path.join(os.path.dirname(__file__), f"{self.call_id}_notes.txt")
+        try:
+            with open(debug_path, "w", encoding="utf-8") as f:
+                for n in self.notes:
+                    f.write(f'"{n}"\n')
+            logger.info("Saved call notes to %s", debug_path)
+        except Exception as e:
+            logger.error("Failed to save debug notes: %s", e)
+        
+        if context.session and hasattr(context.session, "history"):
+            history = context.session.history
+            if history and history.messages and len(history.messages) > 0:
+                notes_text = "\n".join(f"- {n}" for n in self.notes)
+                new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
+                history.messages[0].content = new_instructions
 
-        return f"حاصل ضرب {number1} و {number2} هو {number1 * number2}."
+        return "تم حفظ الملاحظة."
 
 server = AgentServer()
 
@@ -119,6 +142,7 @@ async def my_agent(ctx: JobContext):
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
+        
     )
 
     await ctx.connect()
@@ -129,7 +153,7 @@ async def my_agent(ctx: JobContext):
     await background_audio.start(room=ctx.room, agent_session=session)
 
     await session.start(
-        agent=Assistant(),
+        agent=Assistant(call_id=ctx.room.name),
         room=ctx.room,
     )
 
