@@ -28,25 +28,40 @@ class Assistant(Agent):
     def __init__(self, call_id: str = "local_call") -> None:
         self.call_id = call_id
         self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
+
+        القاعدة الأولى — حفظ المعلومات فوراً:
+        في كل مرة يذكر فيها المستخدم اسمه أو مشكلته أو أي معلومة مهمة، استدعِ أداة add_note فوراً قبل أي رد آخر.
+        أمثلة على متى تستخدم add_note:
+        - قال المستخدم اسمه → استدعِ add_note باسمه
+        - ذكر مشكلة أو شكوى → استدعِ add_note بتفاصيل المشكلة
+        - أعطى رقم طلب أو حساب → استدعِ add_note بالرقم
+        - ذكر أي معلومة تحتاج إليها لاحقاً → استدعِ add_note بها
+
+        قواعد المحادثة:
         أجب دائماً بلهجة سعودية نجدية بشكل مباشر وواضح.
         قصّر إجاباتك قدر الإمكان — جملة أو جملتين كحد أقصى في معظم الأحيان.
-        لا تستخدم تنسيقات أو رموز أو نجمات أو مقدمات فارغة مثل "بالتأكيد" أو "حسناً".
-        كن ودوداً ومباشراً.
-        
-        تعليمات هامة جداً:
-        إذا ذكر المستخدم اسمه أو مشكلته، **يجب** عليك استخدام أداة `add_note` فوراً لحفظ هذه المعلومات في ذاكرتك."""
+        لا تستخدم تنسيقات أو رموز أو مقدمات فارغة مثل بالتأكيد أو حسناً.
+        كن ودوداً ومباشراً."""
         super().__init__(
             instructions=self.base_instructions,
         )
         self.notes = []
 
     async def on_enter(self) -> None:
-        """Fires when the agent becomes active — agent speaks first."""
+        """Fires when the agent becomes active — agent speaks first.
+
+        We must pass user_input alongside instructions so that the chat context
+        contains at least one user-turn before calling the LLM.  Without it the
+        peg-native chat template formats an empty prompt (0 tokens) and the
+        llama.cpp slot is released immediately — producing silence.
+        """
         await self.session.generate_reply(
+            user_input="...",  # synthetic trigger — never spoken, just seeds the chat context
             instructions=(
-                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية، "
-                "ثم اسأله عن اسمه وعن سبب اتصاله."
-            )
+                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
+                "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
+                "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
+            ),
         )
 
     @function_tool()
@@ -55,10 +70,15 @@ class Assistant(Agent):
         context: RunContext,
         note: str,
     ) -> str:
-        """استخدم هذه الأداة لحفظ ملاحظة مهمة (مثلاً اسم المتصل، أو المشاكل التي يواجهها) لتتذكرها طوال المكالمة.
-        
+        """Save an important note about the caller to remember throughout the call.
+        Call this tool IMMEDIATELY whenever the caller mentions:
+        - their name
+        - a problem or complaint
+        - an order number, account number, or any reference
+        - any detail you will need to remember later
+
         Args:
-            note: الملاحظة المراد حفظها. يجب أن تكون واضحة ومباشرة.
+            note: The note to save. Write it clearly and concisely in Arabic.
         """
         logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
         self.notes.append(note)
