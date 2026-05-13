@@ -66,7 +66,7 @@ class Assistant(Agent):
         
         notes_text = "\n".join(f"- {n}" for n in self.notes)
         new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
-        await context.agent.update_instructions(new_instructions)
+        await self.update_instructions(new_instructions)
 
         return "تم حفظ الملاحظة."
 
