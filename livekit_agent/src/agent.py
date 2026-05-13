@@ -40,6 +40,15 @@ class Assistant(Agent):
         )
         self.notes = []
 
+    async def on_enter(self) -> None:
+        """Fires when the agent becomes active — agent speaks first."""
+        await self.session.generate_reply(
+            instructions=(
+                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية، "
+                "ثم اسأله عن اسمه وعن سبب اتصاله."
+            )
+        )
+
     @function_tool()
     async def add_note(
         self,
