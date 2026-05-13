@@ -1,4 +1,5 @@
 venv/
+venv_temp/
 inference/llama/models/
 
 # Environment files with machine-specific config

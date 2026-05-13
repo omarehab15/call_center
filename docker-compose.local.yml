@@ -25,7 +25,6 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
       - LIVEKIT_AGENT_PORT=7880
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-no-key-needed}
       # Remote model endpoints (via Tailscale)
       - STT_PROVIDER=${STT_PROVIDER:-whisper}
       - STT_BASE_URL=${STT_BASE_URL}

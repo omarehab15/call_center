@@ -130,7 +130,6 @@ async def my_agent(ctx: JobContext):
         stt=stt_module.StreamAdapter(
             stt=openai.STT(
                 base_url=stt_base_url,
-                # base_url="http://localhost:11435/v1", # uncomment for local testing
                 model=stt_model,
                 api_key=stt_api_key,
                 language="ar"
@@ -139,7 +138,6 @@ async def my_agent(ctx: JobContext):
         ),
         llm=openai.LLM(
             base_url=llama_base_url,
-            # base_url="http://localhost:11436/v1", # uncomment for local testing
             model=llama_model,
             api_key="no-key-needed"
         ),

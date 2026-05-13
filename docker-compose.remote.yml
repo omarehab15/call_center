@@ -1,5 +1,5 @@
 # docker-compose.remote.yml — Run on the vast.ai GPU machine
-# Serves STT (Whisper) and LLM (llama.cpp / ALLaM-7B) over HTTP
+# Serves STT (Whisper) and LLM (llama.cpp) over HTTP
 # All endpoints are OpenAI-compatible and exposed on 0.0.0.0 for Tailscale access
 # TTS is handled by a cloud provider (e.g. Groq Orpheus / ElevenLabs)
 
