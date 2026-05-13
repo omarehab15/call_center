@@ -19,7 +19,6 @@ from livekit.agents import (
 from livekit.plugins import silero, openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import stt as stt_module
-from livekit.agents.tts import StreamAdapter as TTSStreamAdapter
 
 logger = logging.getLogger("agent")
 
@@ -65,12 +64,9 @@ class Assistant(Agent):
         except Exception as e:
             logger.error("Failed to save debug notes: %s", e)
         
-        if context.session and hasattr(context.session, "history"):
-            history = context.session.history
-            if history and history.items and len(history.items) > 0:
-                notes_text = "\n".join(f"- {n}" for n in self.notes)
-                new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
-                history.items[0].content = new_instructions
+        notes_text = "\n".join(f"- {n}" for n in self.notes)
+        new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
+        await context.agent.update_instructions(new_instructions)
 
         return "تم حفظ الملاحظة."
 
@@ -138,7 +134,7 @@ async def my_agent(ctx: JobContext):
             model=llama_model,
             api_key="no-key-needed"
         ),
-        tts=TTSStreamAdapter(tts=tts_instance),
+        tts=tts_instance,
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
