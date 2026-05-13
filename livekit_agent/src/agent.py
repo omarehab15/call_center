@@ -67,10 +67,10 @@ class Assistant(Agent):
         
         if context.session and hasattr(context.session, "history"):
             history = context.session.history
-            if history and history.messages and len(history.messages) > 0:
+            if history and history.items and len(history.items) > 0:
                 notes_text = "\n".join(f"- {n}" for n in self.notes)
                 new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
-                history.messages[0].content = new_instructions
+                history.items[0].content = new_instructions
 
         return "تم حفظ الملاحظة."
 
