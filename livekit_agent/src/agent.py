@@ -177,12 +177,14 @@ async def my_agent(ctx: JobContext):
             AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
         ],
     )
-    await background_audio.start(room=ctx.room, agent_session=session)
+    
 
     await session.start(
         agent=Assistant(call_id=ctx.room.name),
         room=ctx.room,
     )
+    
+    await background_audio.start(room=ctx.room, agent_session=session)
 
 if __name__ == "__main__":
     cli.run_app(server)
