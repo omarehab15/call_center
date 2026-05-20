@@ -13,6 +13,7 @@ dependencies = [
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv",
     "asyncio",
+    "livekit-plugins-ai-coustics>=0.2.0",
 ]
 
 [dependency-groups]

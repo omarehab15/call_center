@@ -171,17 +171,22 @@ async def my_agent(ctx: JobContext):
     await ctx.connect()
 
     background_audio = BackgroundAudioPlayer(
-        ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.5),
-        thinking_sound=[
-            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
-            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
-        ],
+        ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
+        # thinking_sound=[
+        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
+        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
+        # ],
     )
     
 
     await session.start(
         agent=Assistant(call_id=ctx.room.name),
         room=ctx.room,
+         room_options=room_io.RoomOptions(
+        audio_input=room_io.AudioInputOptions(
+            noise_cancellation=ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_VF_S),
+        ),
+         ),
     )
     
     await background_audio.start(room=ctx.room, agent_session=session)
