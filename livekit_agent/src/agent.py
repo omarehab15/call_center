@@ -112,8 +112,7 @@ async def my_agent(ctx: JobContext):
         "room": ctx.room.name,
     }
 
-    llama_model = os.getenv("LLAMA_MODEL", "allam-7b")
-    llama_base_url = os.getenv("LLAMA_BASE_URL", "http://llama_cpp:11434/v1")
+    groq_llm_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
 
     stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
     if stt_provider == "whisper":
@@ -157,9 +156,9 @@ async def my_agent(ctx: JobContext):
             vad=ctx.proc.userdata["vad"],
         ),
         llm=openai.LLM(
-            base_url=llama_base_url,
-            model=llama_model,
-            api_key="no-key-needed"
+            base_url="https://api.groq.com/openai/v1",
+            model=groq_llm_model,
+            api_key=os.getenv("GROQ_API_KEY", ""),
         ),
         tts=tts_instance,
         turn_detection=MultilingualModel(),

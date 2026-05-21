@@ -1,13 +1,10 @@
 # docker-compose.remote.yml — Run on the vast.ai GPU machine
-# Serves STT (Whisper) and LLM (llama.cpp) over HTTP
-# All endpoints are OpenAI-compatible and exposed on 0.0.0.0 for Tailscale access
-# TTS is handled by a cloud provider (e.g. Groq Orpheus / ElevenLabs)
+# Serves STT (Whisper) only — LLM + TTS are now handled by Groq cloud
+# Whisper endpoint is exposed on 0.0.0.0 for Tailscale access
 
 services:
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # STT — Whisper (via VoxBox)
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─── STT — Whisper (via VoxBox) ──────────────────────────────────────────────
   whisper:
     build:
       context: ./inference/whisper
@@ -17,61 +14,6 @@ services:
       - VOXBOX_HF_REPO_ID=${VOXBOX_HF_REPO_ID:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
     ports:
       - "11435:80"
-    restart: unless-stopped
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # LLM — llama.cpp / ALLaM-7B-Instruct
-  #
-  # VRAM budget on RTX 5090 (32 GB):
-  #   Q6_K_L weights      ~5.9 GB
-  #   KV cache (q8_0)     ~12.0 GB  (12 slots × 4096 ctx × ~1 GB/slot)
-  #   Whisper STT         ~3.0 GB
-  #   ─────────────────────────────
-  #   Total               ~21 GB  →  ~11 GB headroom remaining
-  #
-  # ctx-size = 4096 × parallel → each slot gets the model's full 4K context
-  # ─────────────────────────────────────────────────────────────────────────────
-  llama_cpp:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    command:
-      - --host
-      - 0.0.0.0
-      - --port
-      - "11434"
-      - --hf-repo
-      - "${LLAMA_HF_REPO:-bartowski/ALLaM-AI_ALLaM-7B-Instruct-preview-GGUF}"
-      - --hf-file
-      - "${LLAMA_HF_FILE:-ALLaM-AI_ALLaM-7B-Instruct-preview-Q6_K_L.gguf}"
-      - --alias
-      - "${LLAMA_MODEL_ALIAS:-allam-7b}"
-      - --ctx-size
-      - "${LLAMA_CTX_SIZE:-49152}"   # 4096 × 12 slots
-      - --n-gpu-layers
-      - "999"
-      - --batch-size
-      - "2048"
-      - --threads
-      - "8"
-      - --flash-attn
-      - "on"
-      - --parallel
-      - "${LLAMA_PARALLEL:-12}"         # 12 slots × 4096 ctx = full context per call
-      - --cache-type-k
-      - "q8_0"                         # quantize KV cache → halves KV VRAM cost
-      - --cache-type-v
-      - "q8_0"
-    ports:
-      - "${LLAMA_HOST_PORT:-11436}:11434"
-    volumes:
-      - ./inference/llama/models:/models
-    environment:
-      - XDG_CACHE_HOME=/models
-      - HF_HOME=/models
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/v1/models > /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
     restart: unless-stopped
 
 volumes:
