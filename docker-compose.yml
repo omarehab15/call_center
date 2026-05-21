@@ -1,9 +1,9 @@
 # docker-compose.yml — Run everything on a single machine
-# Whisper STT (local) + Groq LLM + Groq TTS + LiveKit + Agent + Frontend
-# LLM and TTS are handled by Groq cloud (requires GROQ_API_KEY in .env)
+# Whisper STT + habibi-TTS + Groq LLM + LiveKit + Agent + Frontend
 #
 # Usage:
 #   docker compose up --build
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build  # with GPU
 
 services:
 
@@ -21,6 +21,34 @@ services:
       - "11435:80"
     networks:
       - agent_network
+
+  # ─── TTS — habibi-tts (local GPU) ────────────────────────────────────────────
+  habibi_tts:
+    build:
+      context: ./inference/habibi
+      args:
+        HABIBI_MODEL: ${HABIBI_MODEL:-Unified}
+    environment:
+      - HABIBI_MODEL=${HABIBI_MODEL:-Unified}
+      - HABIBI_VOICE=${HABIBI_VOICE:-SAU_male_1}
+      - HABIBI_NFE=${HABIBI_NFE:-16}
+    ports:
+      - "11437:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - agent_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   # ─── LiveKit Server ──────────────────────────────────────────────────────────
   livekit:
@@ -50,12 +78,13 @@ services:
       - STT_API_KEY=no-key-needed
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - TTS_VOICE=${TTS_VOICE:-fahad}
+      - TTS_BASE_URL=http://habibi_tts:8000/v1
+      - TTS_VOICE=${TTS_VOICE:-SAU_male_1}
     depends_on:
       livekit:
         condition: service_started
-      whisper:
-        condition: service_started
+      habibi_tts:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8081/ > /dev/null"]
       interval: 5s

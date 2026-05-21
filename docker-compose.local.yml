@@ -1,6 +1,6 @@
 # docker-compose.local.yml — Run on your local machine
 # LiveKit server + LiveKit Agent + Frontend
-# STT runs on a remote machine (via Tailscale), LLM + TTS via Groq cloud
+# STT + TTS run on the remote vast.ai machine (via Tailscale), LLM via Groq cloud
 #
 # Usage:
 #   docker compose -f docker-compose.local.yml --env-file .env.local up --build
@@ -31,10 +31,12 @@ services:
       - STT_BASE_URL=${STT_BASE_URL}
       - STT_MODEL=${STT_MODEL:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
       - STT_API_KEY=${STT_API_KEY:-no-key-needed}
-      # LLM + TTS — Groq cloud
+      # LLM — Groq cloud
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - TTS_VOICE=${TTS_VOICE:-fahad}
+      # TTS — habibi-tts remote (via Tailscale)
+      - TTS_BASE_URL=${TTS_BASE_URL}
+      - TTS_VOICE=${TTS_VOICE:-SAU_male_1}
     depends_on:
       livekit:
         condition: service_started

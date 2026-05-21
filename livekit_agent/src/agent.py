@@ -47,15 +47,22 @@ class Assistant(Agent):
         )
         self.notes = []
 
-    # async def on_enter(self) -> None:
-    #     await self.session.generate_reply(
-    #         user_input="...",
-    #         instructions=(
-    #             "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
-    #             "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
-    #             "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
-    #         ),
-    #     )
+    async def on_enter(self) -> None:
+        """Fires when the agent becomes active — agent speaks first.
+
+        We must pass user_input alongside instructions so that the chat context
+        contains at least one user-turn before calling the LLM.  Without it the
+        peg-native chat template formats an empty prompt (0 tokens) and the
+        llama.cpp slot is released immediately — producing silence.
+        """
+        await self.session.generate_reply(
+            user_input="...",  # synthetic trigger — never spoken, just seeds the chat context
+            instructions=(
+                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
+                "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
+                "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
+            ),
+        )
 
     @function_tool()
     async def add_note(
@@ -76,6 +83,7 @@ class Assistant(Agent):
         logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
         self.notes.append(note)
         
+        # Debug: write to file in the same directory as agent.py
         debug_path = os.path.join(os.path.dirname(__file__), f"{self.call_id}_notes.txt")
         try:
             with open(debug_path, "w", encoding="utf-8") as f:
@@ -125,13 +133,14 @@ async def my_agent(ctx: JobContext):
         stt_base_url,
     )
 
-    tts_voice = os.getenv("TTS_VOICE", "fahad")
+    tts_voice = os.getenv("TTS_VOICE", "SAU_male_1")
+    tts_base_url = os.getenv("TTS_BASE_URL", "http://habibi_tts:8000/v1")
 
     tts_instance = openai.TTS(
-        base_url="https://api.groq.com/openai/v1",
-        model="canopylabs/orpheus-arabic-saudi",
+        base_url=tts_base_url,
+        model="habibi-tts",
         voice=tts_voice,
-        api_key=os.getenv("GROQ_API_KEY", ""),
+        api_key="no-key-needed",
         response_format="wav",
     )
 
@@ -156,6 +165,7 @@ async def my_agent(ctx: JobContext):
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
+        
     )
 
     await ctx.connect()
@@ -172,6 +182,11 @@ async def my_agent(ctx: JobContext):
     await session.start(
         agent=Assistant(call_id=ctx.room.name),
         room=ctx.room,
+         room_options=room_io.RoomOptions(
+        audio_input=room_io.AudioInputOptions(
+            noise_cancellation=ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_VF_S),
+        ),
+         ),
     )
     
     await background_audio.start(room=ctx.room, agent_session=session)
