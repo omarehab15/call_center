@@ -48,15 +48,8 @@ class Assistant(Agent):
         self.notes = []
 
     async def on_enter(self) -> None:
-        """Fires when the agent becomes active — agent speaks first.
-
-        We must pass user_input alongside instructions so that the chat context
-        contains at least one user-turn before calling the LLM.  Without it the
-        peg-native chat template formats an empty prompt (0 tokens) and the
-        llama.cpp slot is released immediately — producing silence.
-        """
         await self.session.generate_reply(
-            user_input="...",  # synthetic trigger — never spoken, just seeds the chat context
+            user_input="...",
             instructions=(
                 "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
                 "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
@@ -83,7 +76,6 @@ class Assistant(Agent):
         logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
         self.notes.append(note)
         
-        # Debug: write to file in the same directory as agent.py
         debug_path = os.path.join(os.path.dirname(__file__), f"{self.call_id}_notes.txt")
         try:
             with open(debug_path, "w", encoding="utf-8") as f:
@@ -140,7 +132,7 @@ async def my_agent(ctx: JobContext):
         model="canopylabs/orpheus-arabic-saudi",
         voice=tts_voice,
         api_key=os.getenv("GROQ_API_KEY", ""),
-        response_format="wav",  # Groq Orpheus only supports wav
+        response_format="wav",
     )
 
     logger.info("TTS voice=%s", tts_voice)
@@ -164,28 +156,17 @@ async def my_agent(ctx: JobContext):
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
-        
     )
 
     await ctx.connect()
 
     background_audio = BackgroundAudioPlayer(
         ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
-        # thinking_sound=[
-        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
-        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
-        # ],
     )
-    
 
     await session.start(
         agent=Assistant(call_id=ctx.room.name),
         room=ctx.room,
-         room_options=room_io.RoomOptions(
-        audio_input=room_io.AudioInputOptions(
-            noise_cancellation=ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_VF_S),
-        ),
-         ),
     )
     
     await background_audio.start(room=ctx.room, agent_session=session)
