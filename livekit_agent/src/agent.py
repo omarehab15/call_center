@@ -47,15 +47,15 @@ class Assistant(Agent):
         )
         self.notes = []
 
-    async def on_enter(self) -> None:
-        await self.session.generate_reply(
-            user_input="...",
-            instructions=(
-                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
-                "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
-                "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
-            ),
-        )
+    # async def on_enter(self) -> None:
+    #     await self.session.generate_reply(
+    #         user_input="...",
+    #         instructions=(
+    #             "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
+    #             "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
+    #             "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
+    #         ),
+    #     )
 
     @function_tool()
     async def add_note(
@@ -162,7 +162,12 @@ async def my_agent(ctx: JobContext):
 
     background_audio = BackgroundAudioPlayer(
         ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
+        # thinking_sound=[
+        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
+        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
+        # ],
     )
+    
 
     await session.start(
         agent=Assistant(call_id=ctx.room.name),
