@@ -4,16 +4,6 @@
 
 services:
 
-  llama_cpp:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
   whisper:
     environment:
       - VOXBOX_DEVICE=cuda
