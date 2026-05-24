@@ -22,6 +22,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 
+# ffmpeg-python for WAV→MP3 conversion (installed via ffmpeg system package)
+import subprocess as _sp
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("habibi-server")
 
@@ -30,6 +33,9 @@ app = FastAPI(title="Habibi-TTS OpenAI-compatible server")
 # ── Dialect / model config ────────────────────────────────────────────────────
 # Supported dialect IDs: MSA SAU UAE ALG IRQ EGY MAR OMN TUN LEV SDN LBY
 DEFAULT_DIALECT = os.getenv("HABIBI_DIALECT", "SAU")
+# Model variant: Unified (one model for all dialects, recommended)
+#               Specialized (per-dialect model, potentially higher quality for that dialect)
+HABIBI_MODEL = os.getenv("HABIBI_MODEL", "Specialized")
 # Reference audio file path (optional — zero-shot voice cloning)
 # If not set the model uses its built-in default prompt for the dialect.
 REF_AUDIO = os.getenv("HABIBI_REF_AUDIO", "")
@@ -41,10 +47,10 @@ def get_pipeline():
     """Lazy-load the Habibi pipeline once."""
     global _pipeline
     if _pipeline is None:
-        logger.info("Loading Habibi-TTS pipeline (dialect=%s)…", DEFAULT_DIALECT)
+        logger.info("Loading Habibi-TTS pipeline (model=%s dialect=%s)…", HABIBI_MODEL, DEFAULT_DIALECT)
         try:
             from habibi_tts import HabibiTTS  # type: ignore
-            _pipeline = HabibiTTS(dialect=DEFAULT_DIALECT)
+            _pipeline = HabibiTTS(model=HABIBI_MODEL, dialect=DEFAULT_DIALECT)
             logger.info("Habibi-TTS pipeline ready.")
         except ImportError:
             # Fallback: use the f5-tts CLI wrapper if HabibiTTS class not available
@@ -53,18 +59,36 @@ def get_pipeline():
     return _pipeline
 
 
+def wav_to_mp3(wav_bytes: bytes) -> bytes:
+    """Convert WAV bytes → MP3 bytes via ffmpeg (livekit openai.TTS uses Mp3StreamDecoder)."""
+    result = _sp.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "wav", "-i", "pipe:0",
+            "-codec:a", "libmp3lame", "-q:a", "2",
+            "-f", "mp3", "pipe:1",
+        ],
+        input=wav_bytes,
+        capture_output=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg WAV→MP3 failed: {result.stderr.decode()}")
+    return result.stdout
+
+
 def synthesize(text: str, dialect: str) -> bytes:
-    """Generate WAV bytes for the given Arabic text."""
+    """Generate MP3 bytes for the given Arabic text."""
     pipeline = get_pipeline()
 
     if pipeline == "cli":
         # CLI fallback — calls habibi-tts_infer-cli subprocess
-        import subprocess, shlex
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             out_path = tmp.name
 
         cmd = [
             "habibi-tts_infer-cli",
+            "--model", HABIBI_MODEL,
             "--gen_text", text,
             "--dialect_id", dialect,
             "--output_file", out_path,
@@ -74,25 +98,27 @@ def synthesize(text: str, dialect: str) -> bytes:
         if REF_TEXT:
             cmd += ["--ref_text", REF_TEXT]
 
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        result = _sp.run(cmd, capture_output=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.decode())
 
         with open(out_path, "rb") as f:
             wav_bytes = f.read()
         Path(out_path).unlink(missing_ok=True)
-        return wav_bytes
 
     else:
         # HabibiTTS class path
-        audio_data = pipeline.synthesize(text)          # returns np.ndarray or bytes
+        audio_data = pipeline.synthesize(text)
         if isinstance(audio_data, (bytes, bytearray)):
-            return bytes(audio_data)
+            wav_bytes = bytes(audio_data)
+        else:
+            # numpy array → WAV first
+            buf = io.BytesIO()
+            sf.write(buf, audio_data, samplerate=24000, format="WAV")
+            wav_bytes = buf.getvalue()
 
-        # numpy array → WAV bytes
-        buf = io.BytesIO()
-        sf.write(buf, audio_data, samplerate=24000, format="WAV")
-        return buf.getvalue()
+    # livekit openai.TTS plugin always uses Mp3StreamDecoder → must return MP3
+    return wav_to_mp3(wav_bytes)
 
 
 # ── Request model ─────────────────────────────────────────────────────────────
@@ -100,7 +126,7 @@ class TTSRequest(BaseModel):
     model: str = "habibi"
     input: str
     voice: str = DEFAULT_DIALECT      # dialect ID used as "voice" in OpenAI API
-    response_format: str = "wav"
+    response_format: str = "mp3"      # livekit expects mp3
     speed: float = 1.0
 
 
@@ -129,13 +155,13 @@ async def text_to_speech(req: TTSRequest):
     logger.info("TTS request: dialect=%s len=%d", dialect, len(req.input))
 
     try:
-        wav_bytes = synthesize(req.input, dialect)
+        mp3_bytes = synthesize(req.input, dialect)
     except Exception as exc:
         logger.error("Synthesis failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
     return Response(
-        content=wav_bytes,
-        media_type="audio/wav",
-        headers={"Content-Disposition": "attachment; filename=speech.wav"},
+        content=mp3_bytes,
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": "attachment; filename=speech.mp3"},
     )
