@@ -142,6 +142,54 @@ cd livekit_agent && uv run python src/agent.py dev
 cd frontend && pnpm dev
 ```
 
+## SIP Telephony Setup
+
+This project now includes a SIP provisioning script at `livekit_agent/sip_setup.py` that:
+
+- Creates (or reuses) inbound SIP trunk
+- Creates (or reuses) SIP dispatch rule to your agent room
+- Creates (or reuses) outbound SIP trunk
+- Optionally places an outbound call
+
+### 1) Fill SIP variables
+
+Add these variables to your `.env.local` (or export them in shell):
+
+- `SIP_PROVIDER_NUMBER`
+- `SIP_OUTBOUND_HOST`
+- `SIP_DESTINATION_COUNTRY` (example: `US`)
+- `SIP_AUTH_USERNAME` (optional if your provider uses IP-based auth)
+- `SIP_AUTH_PASSWORD` (optional if your provider uses IP-based auth)
+- `SIP_ROOM_NAME` (example: `agent-room`)
+- `SIP_CALL_TO` (optional, needed only when dialing)
+
+### 2) Provision SIP resources
+
+```bash
+cd livekit_agent
+uv run python sip_setup.py setup
+```
+
+### 3) Provision and place a test call
+
+```bash
+cd livekit_agent
+uv run python sip_setup.py setup --call-now --call-to +15559876543
+```
+
+### 4) Place outbound call only
+
+```bash
+cd livekit_agent
+uv run python sip_setup.py call --call-to +15559876543
+```
+
+Notes:
+
+- The script is idempotent by resource name (it reuses existing trunks/rules when names match).
+- If `LIVEKIT_URL` is `ws://` or `wss://`, the script auto-converts it to `http://` or `https://` for server API calls.
+- Run your agent with `uv run python src/agent.py dev` so the room can be handled when calls are dispatched.
+
 ## Requirements
 
 - Docker + Docker Compose
