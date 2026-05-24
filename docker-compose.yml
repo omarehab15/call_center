@@ -27,6 +27,7 @@ services:
     build:
       context: ./inference/habibi_tts
     environment:
+      - HABIBI_MODEL=${HABIBI_MODEL:-Specialized}
       - HABIBI_DIALECT=${HABIBI_DIALECT:-SAU}
       # Optional zero-shot voice cloning — mount a WAV reference and set these:
       # - HABIBI_REF_AUDIO=/refs/my_voice.wav

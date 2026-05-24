@@ -21,6 +21,7 @@ services:
     build:
       context: ./inference/habibi_tts
     environment:
+      - HABIBI_MODEL=${HABIBI_MODEL:-Specialized}
       - HABIBI_DIALECT=${HABIBI_DIALECT:-SAU}
     volumes:
       - habibi-model-cache:/root/.cache

@@ -1,6 +1,7 @@
 # docker-compose.local.yml — Run on your local machine
-# LiveKit server + LiveKit Agent + Frontend + Habibi-TTS
-# STT runs on a remote machine (via Tailscale), LLM via Groq cloud, TTS local
+# LiveKit server + LiveKit Agent + Frontend ONLY
+# STT (Whisper) and TTS (Habibi-TTS) both run on the remote vast.ai GPU machine
+# LLM via Groq cloud
 #
 # Usage:
 #   docker compose -f docker-compose.local.yml --env-file .env.local up --build
@@ -15,19 +16,6 @@ services:
     networks:
       - local_network
 
-  # ─── TTS — Habibi-TTS (local, OpenAI-compatible) ─────────────────────────────
-  habibi_tts:
-    build:
-      context: ./inference/habibi_tts
-    environment:
-      - HABIBI_DIALECT=${HABIBI_DIALECT:-SAU}
-    volumes:
-      - habibi-model-cache:/root/.cache
-    ports:
-      - "8002:8000"
-    networks:
-      - local_network
-
   livekit_agent:
     build:
       context: ./livekit_agent
@@ -39,7 +27,7 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
       - LIVEKIT_AGENT_PORT=7880
-      # STT — remote (via Tailscale)
+      # STT — remote vast.ai (via Tailscale)
       - STT_PROVIDER=${STT_PROVIDER:-whisper}
       - STT_BASE_URL=${STT_BASE_URL}
       - STT_MODEL=${STT_MODEL:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
@@ -47,14 +35,12 @@ services:
       # LLM — Groq cloud
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      # TTS — Habibi-TTS local container
+      # TTS — Habibi-TTS remote vast.ai (via Tailscale)
       - TTS_VOICE=${TTS_VOICE:-SAU}
-      - HABIBI_TTS_BASE_URL=http://habibi_tts:8000/v1
+      - HABIBI_TTS_BASE_URL=${HABIBI_TTS_BASE_URL}
     depends_on:
       livekit:
         condition: service_started
-      habibi_tts:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8081/ > /dev/null"]
       interval: 5s
@@ -79,9 +65,6 @@ services:
         condition: service_started
     networks:
       - local_network
-
-volumes:
-  habibi-model-cache:
 
 networks:
   local_network:
