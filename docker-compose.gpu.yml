@@ -3,8 +3,9 @@
 
 services:
 
-  llama_cpp:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+  whisper:
+    environment:
+      - VOXBOX_DEVICE=cuda
     deploy:
       resources:
         reservations:
@@ -13,9 +14,7 @@ services:
               count: all
               capabilities: [gpu]
 
-  whisper:
-    environment:
-      - VOXBOX_DEVICE=cuda
+  habibi_tts:
     deploy:
       resources:
         reservations:

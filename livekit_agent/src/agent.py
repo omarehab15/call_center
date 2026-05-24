@@ -47,23 +47,6 @@ class Assistant(Agent):
         )
         self.notes = []
 
-    async def on_enter(self) -> None:
-        """Fires when the agent becomes active — agent speaks first.
-
-        We must pass user_input alongside instructions so that the chat context
-        contains at least one user-turn before calling the LLM.  Without it the
-        peg-native chat template formats an empty prompt (0 tokens) and the
-        llama.cpp slot is released immediately — producing silence.
-        """
-        await self.session.generate_reply(
-            user_input="...",  # synthetic trigger — never spoken, just seeds the chat context
-            instructions=(
-                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
-                "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
-                "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
-            ),
-        )
-
     @function_tool()
     async def add_note(
         self,
@@ -82,8 +65,7 @@ class Assistant(Agent):
         """
         logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
         self.notes.append(note)
-        
-        # Debug: write to file in the same directory as agent.py
+
         debug_path = os.path.join(os.path.dirname(__file__), f"{self.call_id}_notes.txt")
         try:
             with open(debug_path, "w", encoding="utf-8") as f:
@@ -92,7 +74,7 @@ class Assistant(Agent):
             logger.info("Saved call notes to %s", debug_path)
         except Exception as e:
             logger.error("Failed to save debug notes: %s", e)
-        
+
         notes_text = "\n".join(f"- {n}" for n in self.notes)
         new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
         await self.update_instructions(new_instructions)
@@ -114,6 +96,7 @@ async def my_agent(ctx: JobContext):
 
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
 
+    # ── STT ───────────────────────────────────────────────────────────────────
     stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
     if stt_provider == "whisper":
         default_stt_base_url = "http://whisper:80/v1"
@@ -133,19 +116,23 @@ async def my_agent(ctx: JobContext):
         stt_base_url,
     )
 
-    tts_voice = os.getenv("TTS_VOICE", "SAU_male_1")
-    tts_base_url = os.getenv("TTS_BASE_URL", "http://habibi_tts:8000/v1")
+    # ── TTS — Habibi-TTS (local, OpenAI-compatible) ──────────────────────────
+    # TTS_VOICE maps to the Habibi dialect ID used as the "voice" parameter.
+    # Supported dialect IDs: MSA SAU UAE ALG IRQ EGY MAR OMN TUN LEV SDN LBY
+    tts_voice = os.getenv("TTS_VOICE", "SAU")
+    habibi_base_url = os.getenv("HABIBI_TTS_BASE_URL", "http://habibi_tts:8000/v1")
 
     tts_instance = openai.TTS(
-        base_url=tts_base_url,
-        model="habibi-tts",
+        base_url=habibi_base_url,
+        model="habibi",
         voice=tts_voice,
-        api_key="no-key-needed",
+        api_key="no-key-needed",   # local server — no auth required
         response_format="wav",
     )
 
-    logger.info("TTS voice=%s", tts_voice)
+    logger.info("TTS provider=habibi base_url=%s voice/dialect=%s", habibi_base_url, tts_voice)
 
+    # ── Session ───────────────────────────────────────────────────────────────
     session = AgentSession(
         stt=stt_module.StreamAdapter(
             stt=openai.STT(
@@ -165,30 +152,19 @@ async def my_agent(ctx: JobContext):
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
-        
     )
 
     await ctx.connect()
 
     background_audio = BackgroundAudioPlayer(
         ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
-        # thinking_sound=[
-        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
-        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
-        # ],
     )
-    
 
     await session.start(
         agent=Assistant(call_id=ctx.room.name),
         room=ctx.room,
-         room_options=room_io.RoomOptions(
-        audio_input=room_io.AudioInputOptions(
-            noise_cancellation=ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_VF_S),
-        ),
-         ),
     )
-    
+
     await background_audio.start(room=ctx.room, agent_session=session)
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # docker-compose.remote.yml — Run on the vast.ai GPU machine
-# Serves STT (Whisper) + TTS (habibi-tts) over HTTP
-# All endpoints are OpenAI-compatible and exposed on 0.0.0.0 for Tailscale access
+# Serves STT (Whisper) + TTS (Habibi-TTS) — LLM is handled by Groq cloud
+# Both endpoints are exposed on 0.0.0.0 for Tailscale access
 
 services:
 
@@ -16,32 +16,18 @@ services:
       - "11435:80"
     restart: unless-stopped
 
-  # ─── TTS — habibi-tts (local GPU) ────────────────────────────────────────────
+  # ─── TTS — Habibi-TTS (local, OpenAI-compatible) ─────────────────────────────
   habibi_tts:
     build:
-      context: ./inference/habibi
-      args:
-        HABIBI_MODEL: ${HABIBI_MODEL:-Unified}
+      context: ./inference/habibi_tts
     environment:
-      - HABIBI_MODEL=${HABIBI_MODEL:-Unified}
-      - HABIBI_VOICE=${HABIBI_VOICE:-SAU_male_1}
-      - HABIBI_NFE=${HABIBI_NFE:-16}
+      - HABIBI_DIALECT=${HABIBI_DIALECT:-SAU}
+    volumes:
+      - habibi-model-cache:/root/.cache
     ports:
-      - "11437:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - "8002:8000"
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health > /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 60s
 
 volumes:
   whisper-cache:
+  habibi-model-cache:

@@ -1,9 +1,9 @@
 # docker-compose.yml — Run everything on a single machine
-# Whisper STT + habibi-TTS + Groq LLM + LiveKit + Agent + Frontend
+# Whisper STT (local) + Groq LLM + Habibi-TTS (local) + LiveKit + Agent + Frontend
+# LLM is handled by Groq cloud (requires GROQ_API_KEY in .env)
 #
 # Usage:
 #   docker compose up --build
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build  # with GPU
 
 services:
 
@@ -22,33 +22,21 @@ services:
     networks:
       - agent_network
 
-  # ─── TTS — habibi-tts (local GPU) ────────────────────────────────────────────
+  # ─── TTS — Habibi-TTS (local, OpenAI-compatible) ─────────────────────────────
   habibi_tts:
     build:
-      context: ./inference/habibi
-      args:
-        HABIBI_MODEL: ${HABIBI_MODEL:-Unified}
+      context: ./inference/habibi_tts
     environment:
-      - HABIBI_MODEL=${HABIBI_MODEL:-Unified}
-      - HABIBI_VOICE=${HABIBI_VOICE:-SAU_male_1}
-      - HABIBI_NFE=${HABIBI_NFE:-16}
+      - HABIBI_DIALECT=${HABIBI_DIALECT:-SAU}
+      # Optional zero-shot voice cloning — mount a WAV reference and set these:
+      # - HABIBI_REF_AUDIO=/refs/my_voice.wav
+      # - HABIBI_REF_TEXT=نص الصوت المرجعي هنا
+    volumes:
+      - habibi-model-cache:/root/.cache
     ports:
-      - "11437:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - "8002:8000"
     networks:
       - agent_network
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health > /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 60s
 
   # ─── LiveKit Server ──────────────────────────────────────────────────────────
   livekit:
@@ -78,10 +66,13 @@ services:
       - STT_API_KEY=no-key-needed
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - TTS_BASE_URL=http://habibi_tts:8000/v1
-      - TTS_VOICE=${TTS_VOICE:-SAU_male_1}
+      # ── Habibi-TTS ──
+      - TTS_VOICE=${TTS_VOICE:-SAU}
+      - HABIBI_TTS_BASE_URL=http://habibi_tts:8000/v1
     depends_on:
       livekit:
+        condition: service_started
+      whisper:
         condition: service_started
       habibi_tts:
         condition: service_healthy
@@ -113,6 +104,7 @@ services:
 
 volumes:
   whisper-data:
+  habibi-model-cache:
 
 networks:
   agent_network:

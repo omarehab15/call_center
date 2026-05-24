@@ -15,8 +15,6 @@ services:
               count: all
               capabilities: [gpu]
 
-  # habibi_tts already has GPU reservation in docker-compose.remote.yml
-  # this overlay adds count: all to use full GPU bandwidth
   habibi_tts:
     deploy:
       resources:
