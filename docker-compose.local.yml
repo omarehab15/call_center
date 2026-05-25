@@ -1,5 +1,6 @@
-# docker-compose.local.yml — Self-hosted LiveKit + SIP on your local/public machine
-# LiveKit server + Redis + LiveKit SIP + LiveKit Agent + Frontend
+# docker-compose.local.yml — Local web stack with optional self-hosted SIP
+# Default: LiveKit server + Redis + LiveKit Agent + Frontend
+# Optional profile "sip": LiveKit SIP service
 # STT runs on a remote machine (via Tailscale), LLM + TTS via Groq cloud
 #
 # Usage:
@@ -29,6 +30,8 @@ services:
 
   sip:
     image: livekit/sip:latest
+    profiles:
+      - sip
     # For Linux production deployments, host networking is often preferred for SIP/RTP:
     # network_mode: host
     # If you enable host networking, remove the explicit ports mapping below.
@@ -79,8 +82,6 @@ services:
       - TTS_VOICE=${TTS_VOICE:-fahad}
     depends_on:
       livekit:
-        condition: service_started
-      sip:
         condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8081/ > /dev/null"]

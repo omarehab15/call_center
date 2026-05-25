@@ -47,15 +47,15 @@ class Assistant(Agent):
         )
         self.notes = []
 
-    # async def on_enter(self) -> None:
-    #     await self.session.generate_reply(
-    #         user_input="...",
-    #         instructions=(
-    #             "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
-    #             "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
-    #             "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
-    #         ),
-    #     )
+    async def on_enter(self) -> None:
+        await self.session.generate_reply(
+            user_input="...",
+            instructions=(
+                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
+                "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
+                "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
+            ),
+        )
 
     @function_tool()
     async def add_note(

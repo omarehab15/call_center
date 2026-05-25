@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # start-local.sh — Run this on your local machine
-# Starts self-hosted LiveKit stack: Redis + LiveKit + SIP + agent + frontend
+# Starts local web stack: Redis + LiveKit + agent + frontend
+# SIP is optional and can be enabled separately.
 # The agent connects to remote STT on the vast.ai machine via Tailscale
 set -euo pipefail
 
@@ -60,8 +61,14 @@ if [ "$FAILED" -eq 1 ]; then
 fi
 
 COMPOSE_FILES=(-f docker-compose.local.yml)
+COMPOSE_ARGS=()
+if [ "${SIP_ENABLED:-false}" = "true" ]; then
+  COMPOSE_ARGS+=(--profile sip)
+fi
+
 if [ "${SIP_TEST_PROFILE:-}" = "vast" ]; then
   COMPOSE_FILES+=(-f docker-compose.local.vast-sip.yml)
+  COMPOSE_ARGS+=(--profile sip)
   echo ""
   echo "SIP test profile: vast (reduced RTP range for limited port budgets)"
   echo "  • RTP range → ${SIP_TEST_RTP_PORT_START:-12000}-${SIP_TEST_RTP_PORT_END:-12031}"
@@ -71,11 +78,16 @@ echo ""
 echo "Services:"
 echo "  • Frontend      → http://localhost:3000"
 echo "  • LiveKit       → ws://localhost:7880"
-echo "  • SIP signaling → ${SIP_PUBLIC_HOST:-<set SIP_PUBLIC_HOST>}:${SIP_SIGNALING_PORT:-5060}"
 echo "  • Agent         → connecting to remote STT + Groq LLM/TTS"
+if [ "${SIP_ENABLED:-false}" = "true" ] || [ "${SIP_TEST_PROFILE:-}" = "vast" ]; then
+  echo "  • SIP signaling → ${SIP_PUBLIC_HOST:-<set SIP_PUBLIC_HOST>}:${SIP_SIGNALING_PORT:-5060}"
+else
+  echo "  • SIP           → disabled (set SIP_ENABLED=true to enable)"
+fi
 echo ""
 
 docker compose \
   "${COMPOSE_FILES[@]}" \
+  "${COMPOSE_ARGS[@]}" \
   --env-file .env.local \
   up --build "$@"

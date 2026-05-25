@@ -153,16 +153,33 @@ This project now includes a SIP provisioning script at `livekit_agent/sip_setup.
 
 ### 1) Fill SIP variables
 
-For fully self-hosted SIP, start by running LiveKit + Redis + LiveKit SIP:
+Web calls and SIP calls are now separated:
+
+- Web stack (default): `redis + livekit + livekit_agent + frontend`
+- SIP stack (optional): `sip` profile
+
+For web only (no SIP):
 
 ```bash
 docker compose -f docker-compose.local.yml --env-file .env.local up --build
 ```
 
+To enable SIP too:
+
+```bash
+docker compose -f docker-compose.local.yml --profile sip --env-file .env.local up --build
+```
+
+Using `start-local.sh`, set:
+
+```bash
+SIP_ENABLED=true ./start-local.sh
+```
+
 For limited-port test environments (for example Vast.ai), use the reduced-RTP overlay:
 
 ```bash
-docker compose -f docker-compose.local.yml -f docker-compose.local.vast-sip.yml --env-file .env.local up --build
+docker compose -f docker-compose.local.yml -f docker-compose.local.vast-sip.yml --profile sip --env-file .env.local up --build
 ```
 
 Then set these variables in `.env.local`:

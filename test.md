@@ -3,7 +3,8 @@
 This is the current setup flow used in this project:
 
 - Remote machine (Vast.ai): Whisper STT only
-- Local machine: Redis + LiveKit + LiveKit SIP + Agent + Frontend
+- Local machine: Redis + LiveKit + Agent + Frontend
+- SIP service is optional and runs as a separate profile
 - Telephony: Self-hosted LiveKit SIP
 - Optional test mode: "Vast-friendly SIP" overlay with a smaller RTP range
 
@@ -63,7 +64,26 @@ Edit `.env.local`:
 
 ---
 
-## 3) Choose SIP port profile
+## 3) Choose runtime mode
+
+### Mode A: Web-only (default)
+
+Runs:
+
+- Redis
+- LiveKit
+- LiveKit Agent
+- Frontend
+
+SIP service is not started.
+
+### Mode B: Web + SIP
+
+Enable SIP profile to run `livekit/sip` alongside web stack.
+
+---
+
+## 4) Choose SIP port profile (only when SIP is enabled)
 
 ### Option A (default): full RTP range
 
@@ -83,15 +103,28 @@ You can tune it in `.env.local`:
 
 ---
 
-## 4) Start local stack
+## 5) Start local stack
 
-### 4.1 Normal mode
+### 5.1 Web-only mode (default)
 
 ```bash
 ./start-local.sh
 ```
 
-### 4.2 Vast-friendly SIP test mode
+### 5.2 Enable SIP mode
+
+```bash
+SIP_ENABLED=true ./start-local.sh
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:SIP_ENABLED="true"
+bash ./start-local.sh
+```
+
+### 5.3 Vast-friendly SIP test mode
 
 ```bash
 SIP_TEST_PROFILE=vast ./start-local.sh
@@ -108,13 +141,13 @@ What starts locally:
 
 - Redis
 - LiveKit Server
-- LiveKit SIP
 - LiveKit Agent
 - Frontend (`http://localhost:3000`)
+- LiveKit SIP (only in SIP-enabled mode)
 
 ---
 
-## 5) Provision SIP resources in LiveKit
+## 6) Provision SIP resources in LiveKit (SIP mode only)
 
 In another terminal:
 
@@ -131,7 +164,7 @@ uv run python sip_setup.py setup --call-now --call-to +15559876543
 
 ---
 
-## 6) SIP provider origination URI
+## 7) SIP provider origination URI
 
 Point provider inbound/origination URI to your self-hosted SIP endpoint:
 
@@ -146,7 +179,7 @@ Examples:
 
 ---
 
-## 7) Public reachability checklist
+## 8) Public reachability checklist
 
 Provider must reach these ports on `SIP_PUBLIC_HOST`:
 
@@ -158,7 +191,7 @@ Provider must reach these ports on `SIP_PUBLIC_HOST`:
 
 ---
 
-## 8) Troubleshooting
+## 9) Troubleshooting
 
 ### Remote STT unreachable
 
@@ -180,4 +213,3 @@ If it fails:
 ### Outbound trunk creation fails
 
 - verify `SIP_OUTBOUND_HOST` is a SIP host/domain (not `+phone_number`)
-
