@@ -159,6 +159,12 @@ For fully self-hosted SIP, start by running LiveKit + Redis + LiveKit SIP:
 docker compose -f docker-compose.local.yml --env-file .env.local up --build
 ```
 
+For limited-port test environments (for example Vast.ai), use the reduced-RTP overlay:
+
+```bash
+docker compose -f docker-compose.local.yml -f docker-compose.local.vast-sip.yml --env-file .env.local up --build
+```
+
 Then set these variables in `.env.local`:
 
 - `SIP_PROVIDER_NUMBER`

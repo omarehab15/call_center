@@ -1,159 +1,183 @@
-Below is a complete runnable Python example that sets up:
+# Local Voice AI + Self-hosted SIP (Vast.ai + Local) Runbook
 
-* Inbound trunk + dispatch rule (calls go to a room)
-* Outbound trunk
-* Makes an outbound call into a room
+This is the current setup flow used in this project:
 
-Based on the official `SipService` client implementation in the Python SDK.
-
-Sources:
-
-* [sip_service.py](https://github.com/livekit/python-sdks/blob/84a60c13965a5b06a7c5d15242eaacda84495ca4/livekit-api/livekit/api/sip_service.py?utm_source=chatgpt.com)
-* [SIP API reference](https://docs.livekit.io/reference/telephony/sip-api/?utm_source=chatgpt.com)
+- Remote machine (Vast.ai): Whisper STT only
+- Local machine: Redis + LiveKit + LiveKit SIP + Agent + Frontend
+- Telephony: Self-hosted LiveKit SIP
+- Optional test mode: "Vast-friendly SIP" overlay with a smaller RTP range
 
 ---
 
-# Install
+## 1) Remote (Vast.ai) machine setup
+
+### 1.1 Prerequisites
+
+- Ubuntu VM on Vast.ai (not Docker template)
+- Docker + Docker Compose
+- NVIDIA driver + NVIDIA container toolkit
+- Tailscale connected to the same tailnet as local machine
+
+### 1.2 Start remote STT
 
 ```bash
-pip install livekit-api
+git clone <your-repo-url>
+cd local_call_center
+cp .env.remote.example .env.remote
+chmod +x start-remote.sh
+./start-remote.sh
 ```
 
----
-
-# Set Environment Variables
+### 1.3 Verify remote STT
 
 ```bash
-export LIVEKIT_URL=https://your-project.livekit.cloud
-export LIVEKIT_API_KEY=your_key
-export LIVEKIT_API_SECRET=your_secret
+curl http://localhost:11435/v1/models
+tailscale ip -4
+```
+
+Save the Tailscale IP (example: `100.88.77.66`).
+
+---
+
+## 2) Local machine setup
+
+### 2.1 Prepare `.env.local`
+
+```bash
+cp .env.local.example .env.local
+```
+
+Edit `.env.local`:
+
+- Set STT endpoint to Vast.ai Tailscale IP:
+  - `STT_BASE_URL=http://100.88.77.66:11435/v1`
+- Set Groq key/model for LLM/TTS:
+  - `GROQ_API_KEY=...`
+  - `GROQ_LLM_MODEL=...`
+- Set SIP values:
+  - `SIP_PROVIDER_NUMBER=+E164_PROVIDER_NUMBER`
+  - `SIP_OUTBOUND_HOST=sip.provider.com` (must be provider host/domain, not phone number)
+  - `SIP_DESTINATION_COUNTRY=US` (or your destination country code)
+  - `SIP_AUTH_USERNAME` / `SIP_AUTH_PASSWORD` (if provider requires auth)
+  - `SIP_PUBLIC_HOST=<public-dns-or-ip>`
+
+---
+
+## 3) Choose SIP port profile
+
+### Option A (default): full RTP range
+
+Uses `10000-20000` UDP RTP range from `docker-compose.local.yml`.
+
+### Option B (testing): Vast-friendly smaller RTP range
+
+Use overlay file:
+
+- `docker-compose.local.vast-sip.yml`
+- RTP range defaults to `12000-12031`
+
+You can tune it in `.env.local`:
+
+- `SIP_TEST_RTP_PORT_START=12000`
+- `SIP_TEST_RTP_PORT_END=12031`
+
+---
+
+## 4) Start local stack
+
+### 4.1 Normal mode
+
+```bash
+./start-local.sh
+```
+
+### 4.2 Vast-friendly SIP test mode
+
+```bash
+SIP_TEST_PROFILE=vast ./start-local.sh
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:SIP_TEST_PROFILE="vast"
+bash ./start-local.sh
+```
+
+What starts locally:
+
+- Redis
+- LiveKit Server
+- LiveKit SIP
+- LiveKit Agent
+- Frontend (`http://localhost:3000`)
+
+---
+
+## 5) Provision SIP resources in LiveKit
+
+In another terminal:
+
+```bash
+cd livekit_agent
+uv run python sip_setup.py setup
+```
+
+Optional outbound call test:
+
+```bash
+uv run python sip_setup.py setup --call-now --call-to +15559876543
 ```
 
 ---
 
-# Full Example
+## 6) SIP provider origination URI
 
-```python
-import os
-import asyncio
+Point provider inbound/origination URI to your self-hosted SIP endpoint:
 
-from livekit import api
-from livekit.protocol.sip import (
-    CreateSIPInboundTrunkRequest,
-    SIPInboundTrunkInfo,
-    CreateSIPOutboundTrunkRequest,
-    SIPOutboundTrunkInfo,
-    CreateSIPDispatchRuleRequest,
-    SIPDispatchRule,
-    SIPDispatchRuleDirect,
-    CreateSIPParticipantRequest,
-)
+- UDP: `sip:<SIP_PUBLIC_HOST>:<SIP_SIGNALING_PORT>;transport=udp`
+- TCP: `sip:<SIP_PUBLIC_HOST>:<SIP_SIGNALING_PORT>;transport=tcp`
+- TLS: `sip:<SIP_PUBLIC_HOST>:<SIP_TLS_PORT>;transport=tls`
 
-LIVEKIT_URL = os.environ["LIVEKIT_URL"]
-API_KEY = os.environ["LIVEKIT_API_KEY"]
-API_SECRET = os.environ["LIVEKIT_API_SECRET"]
+Examples:
 
-PROVIDER_NUMBER = "+15551234567"   # number from your SIP provider
-OUTBOUND_HOST = "sip.provider.com" # your provider SIP host
-DEST_COUNTRY = "US"                # ISO 2-letter code
+- `sip:sip.example.com:5060;transport=udp`
+- `sip:203.0.113.10:5060;transport=tcp`
 
-ROOM_NAME = "agent-room"
-CALL_TO = "+15559876543"           # number to dial outbound
+---
 
+## 7) Public reachability checklist
 
-async def main():
-    lkapi = api.LiveKitAPI(
-        url=LIVEKIT_URL,
-        api_key=API_KEY,
-        api_secret=API_SECRET,
-    )
+Provider must reach these ports on `SIP_PUBLIC_HOST`:
 
-    sip = lkapi.sip
+- SIP signaling: `5060` (UDP/TCP)
+- Optional SIP TLS: `5061` (TCP)
+- RTP media:
+  - default: `10000-20000` UDP
+  - Vast-friendly test overlay: `12000-12031` UDP (or your custom test range)
 
-    # -----------------------
-    # 1. Create inbound trunk
-    # -----------------------
-    inbound_trunk = await sip.create_inbound_trunk(
-        CreateSIPInboundTrunkRequest(
-            trunk=SIPInboundTrunkInfo(
-                name="my-inbound-trunk",
-                numbers=[PROVIDER_NUMBER],
-                auth_username="your_sip_username",
-                auth_password="your_sip_password",
-            )
-        )
-    )
+---
 
-    print("Inbound trunk created:", inbound_trunk.sip_trunk_id)
+## 8) Troubleshooting
 
-    # -----------------------
-    # 2. Create dispatch rule
-    # -----------------------
-    dispatch_rule = await sip.create_dispatch_rule(
-        CreateSIPDispatchRuleRequest(
-            name="route-to-agent-room",
-            trunk_ids=[inbound_trunk.sip_trunk_id],
-            rule=SIPDispatchRule(
-                dispatch_rule_direct=SIPDispatchRuleDirect(
-                    room_name=ROOM_NAME
-                )
-            )
-        )
-    )
+### Remote STT unreachable
 
-    print("Dispatch rule created:", dispatch_rule.sip_dispatch_rule_id)
-
-    # -----------------------
-    # 3. Create outbound trunk
-    # -----------------------
-    outbound_trunk = await sip.create_outbound_trunk(
-        CreateSIPOutboundTrunkRequest(
-            trunk=SIPOutboundTrunkInfo(
-                name="my-outbound-trunk",
-                address=OUTBOUND_HOST,
-                destination_country=DEST_COUNTRY,
-                numbers=[PROVIDER_NUMBER],
-                auth_username="your_sip_username",
-                auth_password="your_sip_password",
-            )
-        )
-    )
-
-    print("Outbound trunk created:", outbound_trunk.sip_trunk_id)
-
-    # -----------------------
-    # 4. Make outbound call
-    # -----------------------
-    participant = await sip.create_sip_participant(
-        CreateSIPParticipantRequest(
-            sip_trunk_id=outbound_trunk.sip_trunk_id,
-            sip_call_to=CALL_TO,
-            room_name=ROOM_NAME,
-            wait_until_answered=True,
-        )
-    )
-
-    print(
-        "Outbound call started. Participant ID:",
-        participant.participant_id
-    )
-
-
-asyncio.run(main())
+```bash
+curl http://<TAILSCALE_IP>:11435/v1/models
 ```
 
----
+If it fails:
 
-# How This Connects to Your Agent
+- confirm `tailscale status` on both machines
+- confirm `./start-remote.sh` is running on Vast.ai
 
-Your LiveKit Agent must join `ROOM_NAME`.
+### SIP trunks created but no audio
 
-Flow:
+- verify RTP UDP ports are truly open and forwarded on public host
+- confirm provider is using the same transport/port as your origination URI
+- in test mode, ensure provider/firewall allows the smaller RTP range you configured
 
-* Inbound calls → SIP participant joins `ROOM_NAME`
-* Outbound calls → callee joins `ROOM_NAME`
-* Your agent talks normally via audio tracks
+### Outbound trunk creation fails
 
----
+- verify `SIP_OUTBOUND_HOST` is a SIP host/domain (not `+phone_number`)
 
-If you want, I can now show you how to modify your existing [LiveKit](https://livekit.io/?utm_source=chatgpt.com) Agent code so it auto-answers inbound calls cleanly.

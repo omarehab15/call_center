@@ -59,6 +59,14 @@ if [ "$FAILED" -eq 1 ]; then
   esac
 fi
 
+COMPOSE_FILES=(-f docker-compose.local.yml)
+if [ "${SIP_TEST_PROFILE:-}" = "vast" ]; then
+  COMPOSE_FILES+=(-f docker-compose.local.vast-sip.yml)
+  echo ""
+  echo "SIP test profile: vast (reduced RTP range for limited port budgets)"
+  echo "  • RTP range → ${SIP_TEST_RTP_PORT_START:-12000}-${SIP_TEST_RTP_PORT_END:-12031}"
+fi
+
 echo ""
 echo "Services:"
 echo "  • Frontend      → http://localhost:3000"
@@ -68,6 +76,6 @@ echo "  • Agent         → connecting to remote STT + Groq LLM/TTS"
 echo ""
 
 docker compose \
-  -f docker-compose.local.yml \
+  "${COMPOSE_FILES[@]}" \
   --env-file .env.local \
   up --build "$@"
