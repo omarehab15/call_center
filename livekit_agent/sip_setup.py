@@ -86,6 +86,19 @@ def _normalize_livekit_url(url: str) -> str:
     return url
 
 
+def _validate_sip_provider_config(provider_number: str, outbound_host: str) -> None:
+    if not provider_number.startswith("+"):
+        raise ValueError(
+            "SIP_PROVIDER_NUMBER must be in E.164 format (example: +15551234567)."
+        )
+
+    if outbound_host.startswith("+"):
+        raise ValueError(
+            "SIP_OUTBOUND_HOST looks like a phone number. "
+            "Set it to your provider trunk domain/host (for example: sip.provider.com)."
+        )
+
+
 def _build_config(args: argparse.Namespace) -> SIPConfig:
     call_to = args.call_to if args.call_to is not None else os.getenv("SIP_CALL_TO")
     room_name = (
@@ -94,12 +107,16 @@ def _build_config(args: argparse.Namespace) -> SIPConfig:
         else os.getenv("SIP_ROOM_NAME", "agent-room")
     )
 
+    provider_number = _require_env("SIP_PROVIDER_NUMBER")
+    outbound_host = _require_env("SIP_OUTBOUND_HOST")
+    _validate_sip_provider_config(provider_number, outbound_host)
+
     return SIPConfig(
         livekit_url=_normalize_livekit_url(_require_env("LIVEKIT_URL")),
         livekit_api_key=_require_env("LIVEKIT_API_KEY"),
         livekit_api_secret=_require_env("LIVEKIT_API_SECRET"),
-        provider_number=_require_env("SIP_PROVIDER_NUMBER"),
-        outbound_host=_require_env("SIP_OUTBOUND_HOST"),
+        provider_number=provider_number,
+        outbound_host=outbound_host,
         destination_country=os.getenv("SIP_DESTINATION_COUNTRY", "US").upper(),
         room_name=room_name,
         sip_auth_username=(os.getenv("SIP_AUTH_USERNAME") or "").strip() or None,

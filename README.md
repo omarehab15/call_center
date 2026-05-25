@@ -153,15 +153,30 @@ This project now includes a SIP provisioning script at `livekit_agent/sip_setup.
 
 ### 1) Fill SIP variables
 
-Add these variables to your `.env.local` (or export them in shell):
+For fully self-hosted SIP, start by running LiveKit + Redis + LiveKit SIP:
+
+```bash
+docker compose -f docker-compose.local.yml --env-file .env.local up --build
+```
+
+Then set these variables in `.env.local`:
 
 - `SIP_PROVIDER_NUMBER`
-- `SIP_OUTBOUND_HOST`
+- `SIP_OUTBOUND_HOST` (your provider termination host/domain, not a phone number)
 - `SIP_DESTINATION_COUNTRY` (example: `US`)
 - `SIP_AUTH_USERNAME` (optional if your provider uses IP-based auth)
 - `SIP_AUTH_PASSWORD` (optional if your provider uses IP-based auth)
 - `SIP_ROOM_NAME` (example: `agent-room`)
 - `SIP_CALL_TO` (optional, needed only when dialing)
+- `SIP_PUBLIC_HOST` (public DNS/IP of your self-hosted SIP service)
+
+Provider origination URI should point to your self-hosted SIP endpoint, for example:
+
+- TCP: `sip:${SIP_PUBLIC_HOST}:${SIP_SIGNALING_PORT};transport=tcp`
+- UDP: `sip:${SIP_PUBLIC_HOST}:${SIP_SIGNALING_PORT};transport=udp`
+- TLS: `sip:${SIP_PUBLIC_HOST}:${SIP_TLS_PORT};transport=tls`
+
+Your SIP provider must be able to reach signaling (`5060`/`5061`) and RTP UDP (`10000-20000`) on that host.
 
 ### 2) Provision SIP resources
 

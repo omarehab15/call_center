@@ -1,51 +1,56 @@
 #!/usr/bin/env bash
 # start-local.sh — Run this on your local machine
-# Starts LiveKit server, agent, and frontend
-# The agent connects to remote model APIs on the vast.ai machine via Tailscale
+# Starts self-hosted LiveKit stack: Redis + LiveKit + SIP + agent + frontend
+# The agent connects to remote STT on the vast.ai machine via Tailscale
 set -euo pipefail
 
-# Load the .env.local to read REMOTE_HOST-related URLs
+# Load .env.local to read STT endpoint and runtime config
 ENV_FILE=".env.local"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: $ENV_FILE not found."
-  echo "Copy .env.local.example to .env.local and set your vast.ai Tailscale IP."
+  echo "Copy .env.local.example to .env.local and set your vast.ai Tailscale STT URL."
   exit 1
 fi
 
-# Extract the remote host IP from STT_BASE_URL in .env.local
-REMOTE_HOST=$(grep -oP 'STT_BASE_URL=http://\K[^:]+' "$ENV_FILE" 2>/dev/null || echo "")
+# shellcheck disable=SC1090
+source "$ENV_FILE"
 
-if [ -z "$REMOTE_HOST" ] || [ "$REMOTE_HOST" = "100.x.x.x" ]; then
-  echo "ERROR: Please update $ENV_FILE with your vast.ai Tailscale IP."
-  echo "Replace 100.x.x.x with the actual IP (e.g., 100.64.0.5)"
+if [ -z "${STT_BASE_URL:-}" ]; then
+  echo "ERROR: STT_BASE_URL is missing in $ENV_FILE."
+  echo "Set it to your vast.ai/Tailscale STT endpoint (example: http://100.64.0.5:11435/v1)."
   exit 1
 fi
+
+if [[ "$STT_BASE_URL" == *"100.x.x.x"* ]]; then
+  echo "ERROR: Please update STT_BASE_URL in $ENV_FILE with your actual vast.ai Tailscale IP."
+  echo "Example: STT_BASE_URL=http://100.64.0.5:11435/v1"
+  exit 1
+fi
+
+# Normalize STT models endpoint to check connectivity
+STT_MODELS_ENDPOINT="${STT_BASE_URL%/}/models"
 
 echo "========================================"
 echo "  Starting local stack"
 echo "========================================"
 echo ""
-echo "Remote models host: $REMOTE_HOST"
+echo "Remote STT endpoint: $STT_BASE_URL"
 echo ""
 
-# Check connectivity to remote models (STT + LLM only — TTS is Groq cloud)
-echo "Checking remote model connectivity..."
+echo "Checking remote STT connectivity..."
 FAILED=0
-for endpoint in "$REMOTE_HOST:11435/v1/models" "$REMOTE_HOST:11436/v1/models"; do
-  PORT=$(echo "$endpoint" | grep -oP ':\K[0-9]+')
-  if curl -sf --connect-timeout 5 "http://$endpoint" > /dev/null 2>&1; then
-    echo "  ✓ Port $PORT reachable"
-  else
-    echo "  ✗ Port $PORT NOT reachable"
-    FAILED=1
-  fi
-done
+if curl -sf --connect-timeout 5 "$STT_MODELS_ENDPOINT" > /dev/null 2>&1; then
+  echo "  ✓ STT endpoint reachable ($STT_MODELS_ENDPOINT)"
+else
+  echo "  ✗ STT endpoint NOT reachable ($STT_MODELS_ENDPOINT)"
+  FAILED=1
+fi
 
 if [ "$FAILED" -eq 1 ]; then
   echo ""
-  echo "WARNING: Some remote model endpoints are not reachable."
-  echo "Make sure the models are running on the vast.ai machine (./start-remote.sh)"
+  echo "WARNING: Remote STT endpoint is not reachable."
+  echo "Make sure Whisper is running on the vast.ai machine (./start-remote.sh)"
   echo ""
   read -r -p "Continue anyway? (y/N): " choice
   case "$choice" in
@@ -58,7 +63,8 @@ echo ""
 echo "Services:"
 echo "  • Frontend      → http://localhost:3000"
 echo "  • LiveKit       → ws://localhost:7880"
-echo "  • Agent          → connecting to remote models"
+echo "  • SIP signaling → ${SIP_PUBLIC_HOST:-<set SIP_PUBLIC_HOST>}:${SIP_SIGNALING_PORT:-5060}"
+echo "  • Agent         → connecting to remote STT + Groq LLM/TTS"
 echo ""
 
 docker compose \
