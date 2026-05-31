@@ -14,6 +14,12 @@ dependencies = [
     "python-dotenv",
     "asyncio",
     "livekit-plugins-ai-coustics>=0.2.0",
+    "chromadb>=0.4.0",
+]
+
+[project.optional-dependencies]
+rag-local = [
+    "sentence-transformers>=2.2.0",
 ]
 
 [dependency-groups]

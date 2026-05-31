@@ -13,11 +13,15 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger("agent.rag")
 
-DEFAULT_COLLECTION_NAME = "call_center_knowledge"
-DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
+DEFAULT_COLLECTION_PREFIX = "call_center_knowledge"
+DEFAULT_EMBEDDING_PROVIDER = "chroma"
+DEFAULT_CHROMA_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-m3"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_CHROMA_PATH = "rag/chroma"
 DEFAULT_KNOWLEDGE_DIR = "knowledge_base"
 SUPPORTED_EXTENSIONS = {".md", ".txt", ".html", ".htm", ".json", ".csv"}
+LOCAL_EMBEDDING_PROVIDERS = {"local", "sentence-transformers", "sentence_transformers"}
 
 
 class RagRetriever(Protocol):
@@ -30,27 +34,46 @@ class RagConfig:
     enabled: bool
     chroma_path: Path
     collection_name: str
+    embedding_provider: str
     embedding_model: str
     top_k: int
     max_context_chars: int
     device: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_base_url: Optional[str] = None
 
     @classmethod
     def from_env(cls, *, force_enabled: bool = False) -> "RagConfig":
+        provider = os.getenv(
+            "RAG_EMBEDDING_PROVIDER",
+            DEFAULT_EMBEDDING_PROVIDER,
+        ).strip().lower()
         return cls(
             enabled=force_enabled or _env_bool("RAG_ENABLED", False),
             chroma_path=Path(os.getenv("RAG_CHROMA_PATH", DEFAULT_CHROMA_PATH)),
-            collection_name=os.getenv("RAG_COLLECTION_NAME", DEFAULT_COLLECTION_NAME),
-            embedding_model=os.getenv("RAG_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+            collection_name=os.getenv("RAG_COLLECTION_NAME")
+            or _default_collection_name(provider),
+            embedding_provider=provider,
+            embedding_model=_embedding_model_from_env(provider),
             top_k=max(1, _env_int("RAG_TOP_K", 4)),
             max_context_chars=max(300, _env_int("RAG_MAX_CONTEXT_CHARS", 1800)),
             device=os.getenv("RAG_EMBEDDING_DEVICE") or None,
+            embedding_api_key=os.getenv("RAG_EMBEDDING_API_KEY")
+            or os.getenv("OPENAI_API_KEY"),
+            embedding_base_url=os.getenv("RAG_EMBEDDING_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL"),
         )
 
 
-class LocalBGEEmbeddingFunction:
+class LocalSentenceTransformerEmbeddingFunction:
     def __init__(self, model_name: str, device: Optional[str] = None) -> None:
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "RAG_EMBEDDING_PROVIDER=sentence-transformers requires the "
+                "optional rag-local dependencies."
+            ) from exc
 
         self._model = SentenceTransformer(model_name, device=device)
 
@@ -61,6 +84,62 @@ class LocalBGEEmbeddingFunction:
             show_progress_bar=False,
         )
         return embeddings.tolist()
+
+
+class OpenAIEmbeddingFunction:
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        api_key: Optional[str],
+        base_url: Optional[str] = None,
+    ) -> None:
+        if not api_key:
+            raise RuntimeError(
+                "RAG_EMBEDDING_PROVIDER=openai requires RAG_EMBEDDING_API_KEY "
+                "or OPENAI_API_KEY."
+            )
+
+        from openai import OpenAI
+
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self._client = OpenAI(**client_kwargs)
+        self._model_name = model_name
+
+    def __call__(self, input: Sequence[str]) -> list[list[float]]:
+        response = self._client.embeddings.create(
+            model=self._model_name,
+            input=list(input),
+        )
+        return [item.embedding for item in response.data]
+
+
+def build_embedding_function(config: RagConfig) -> Any:
+    provider = config.embedding_provider
+    if provider in {"chroma", "default", "onnx", "mini"}:
+        from chromadb.utils import embedding_functions
+
+        return embedding_functions.DefaultEmbeddingFunction()
+
+    if provider in LOCAL_EMBEDDING_PROVIDERS:
+        return LocalSentenceTransformerEmbeddingFunction(
+            config.embedding_model,
+            device=config.device,
+        )
+
+    if provider == "openai":
+        return OpenAIEmbeddingFunction(
+            config.embedding_model,
+            api_key=config.embedding_api_key,
+            base_url=config.embedding_base_url,
+        )
+
+    raise ValueError(
+        "Unsupported RAG_EMBEDDING_PROVIDER="
+        f"{provider!r}. Use chroma, openai, or sentence-transformers."
+    )
 
 
 class ChromaRagRetriever:
@@ -76,10 +155,7 @@ class ChromaRagRetriever:
         client = chromadb.PersistentClient(path=str(config.chroma_path))
         collection = client.get_or_create_collection(
             name=config.collection_name,
-            embedding_function=LocalBGEEmbeddingFunction(
-                config.embedding_model,
-                device=config.device,
-            ),
+            embedding_function=build_embedding_function(config),
             metadata={"hnsw:space": "cosine"},
         )
         return cls(config=config, collection=collection)
@@ -106,9 +182,10 @@ def build_rag_from_env() -> Optional[RagRetriever]:
         return None
 
     logger.info(
-        "Starting RAG with Chroma collection=%s path=%s embedding_model=%s",
+        "Starting RAG with Chroma collection=%s path=%s embedding_provider=%s embedding_model=%s",
         config.collection_name,
         config.chroma_path,
+        config.embedding_provider,
         config.embedding_model,
     )
     return ChromaRagRetriever.from_config(config)
@@ -167,10 +244,7 @@ def ingest_directory(
 
     collection = client.get_or_create_collection(
         name=config.collection_name,
-        embedding_function=LocalBGEEmbeddingFunction(
-            config.embedding_model,
-            device=config.device,
-        ),
+        embedding_function=build_embedding_function(config),
         metadata={"hnsw:space": "cosine"},
     )
 
@@ -227,10 +301,12 @@ def chunk_text(text: str, *, chunk_size: int, overlap: int) -> list[str]:
     start = 0
     while start < len(normalized):
         end = min(start + chunk_size, len(normalized))
-        split_at = normalized.rfind("\n\n", start, end)
-        if split_at <= start:
-            split_at = normalized.rfind("\n", start, end)
-        if split_at <= start:
+        min_split_at = start + overlap + 1
+        split_search_start = min(end, min_split_at + 1)
+        split_at = normalized.rfind("\n\n", split_search_start, end)
+        if split_at <= min_split_at:
+            split_at = normalized.rfind("\n", split_search_start, end)
+        if split_at <= min_split_at:
             split_at = end
 
         chunk = normalized[start:split_at].strip()
@@ -239,7 +315,12 @@ def chunk_text(text: str, *, chunk_size: int, overlap: int) -> list[str]:
 
         if split_at >= len(normalized):
             break
-        start = max(0, split_at - overlap)
+        next_start = max(0, split_at - overlap)
+        if next_start <= start:
+            next_start = split_at
+        if next_start <= start:
+            break
+        start = next_start
 
     return chunks
 
@@ -293,6 +374,27 @@ def _env_int(name: str, default: int) -> int:
     except ValueError:
         logger.warning("Invalid integer for %s=%s; using %s", name, raw, default)
         return default
+
+
+def _embedding_model_from_env(provider: str) -> str:
+    raw = os.getenv("RAG_EMBEDDING_MODEL")
+    if raw:
+        return raw
+    if provider == "openai":
+        return DEFAULT_OPENAI_EMBEDDING_MODEL
+    if provider in LOCAL_EMBEDDING_PROVIDERS:
+        return DEFAULT_LOCAL_EMBEDDING_MODEL
+    return DEFAULT_CHROMA_EMBEDDING_MODEL
+
+
+def _default_collection_name(provider: str) -> str:
+    if provider in {"chroma", "default", "onnx", "mini"}:
+        suffix = "chroma"
+    elif provider in LOCAL_EMBEDDING_PROVIDERS:
+        suffix = "local"
+    else:
+        suffix = provider.replace("-", "_")
+    return f"{DEFAULT_COLLECTION_PREFIX}_{suffix}"
 
 
 def _first_result_list(value: Any) -> list[Any]:

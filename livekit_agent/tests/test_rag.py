@@ -1,7 +1,7 @@
 import pytest
 
 from agent import Assistant
-from rag import chunk_text, format_rag_results, stable_chunk_id
+from rag import RagConfig, chunk_text, format_rag_results, stable_chunk_id
 
 
 class FakeRetriever:
@@ -59,6 +59,21 @@ async def test_agent_skips_rag_context_when_no_result() -> None:
     )
 
     assert turn_ctx.messages == []
+
+
+def test_rag_config_defaults_to_lightweight_chroma(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "RAG_COLLECTION_NAME",
+        "RAG_EMBEDDING_PROVIDER",
+        "RAG_EMBEDDING_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    config = RagConfig.from_env(force_enabled=True)
+
+    assert config.embedding_provider == "chroma"
+    assert config.embedding_model == "all-MiniLM-L6-v2"
+    assert config.collection_name == "call_center_knowledge_chroma"
 
 
 def test_chunk_text_uses_overlap() -> None:

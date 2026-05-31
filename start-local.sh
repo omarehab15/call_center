@@ -74,6 +74,112 @@ if [ "${SIP_TEST_PROFILE:-}" = "vast" ]; then
   echo "  • RTP range → ${SIP_TEST_RTP_PORT_START:-12000}-${SIP_TEST_RTP_PORT_END:-12031}"
 fi
 
+compose_cmd() {
+  docker compose \
+    "${COMPOSE_FILES[@]}" \
+    "${COMPOSE_ARGS[@]}" \
+    --env-file .env.local \
+    "$@"
+}
+
+build_images_if_needed() {
+  local build_mode="${BUILD_IMAGES:-missing}"
+  local build_mode_normalized="${build_mode,,}"
+  local build_progress="${BUILD_PROGRESS:-plain}"
+  local build_services=(livekit_agent frontend)
+  local missing_services=()
+  local service
+  local image_id
+
+  case "$build_mode_normalized" in
+    always|true|1|yes)
+      echo "Building images..."
+      compose_cmd build --progress "$build_progress" "${build_services[@]}"
+      ;;
+    missing|auto)
+      for service in "${build_services[@]}"; do
+        image_id="$(compose_cmd images -q "$service" 2>/dev/null || true)"
+        if [ -z "$image_id" ]; then
+          missing_services+=("$service")
+        fi
+      done
+
+      if [ "${#missing_services[@]}" -gt 0 ]; then
+        echo "Building missing images: ${missing_services[*]}"
+        compose_cmd build --progress "$build_progress" "${missing_services[@]}"
+      else
+        echo "Images already exist; skipping build."
+        echo "  Set BUILD_IMAGES=always to force a rebuild."
+        echo "  Set BUILD_PROGRESS=plain to show full build steps."
+      fi
+      ;;
+    never|false|0|no|skip)
+      echo "Skipping image build (BUILD_IMAGES=$build_mode)."
+      ;;
+    *)
+      echo "ERROR: BUILD_IMAGES must be one of: always, missing, never."
+      exit 1
+      ;;
+  esac
+}
+
+rag_ingest_signature() {
+  printf 'provider=%s\nmodel=%s\ncollection=%s\n' \
+    "${RAG_EMBEDDING_PROVIDER:-chroma}" \
+    "${RAG_EMBEDDING_MODEL:-}" \
+    "${RAG_COLLECTION_NAME:-}"
+}
+
+should_ingest_rag() {
+  local ingest_mode="${RAG_INGEST_MODE:-changed}"
+  local ingest_mode_normalized="${ingest_mode,,}"
+  local knowledge_dir="${RAG_KNOWLEDGE_DIR_HOST:-./livekit_agent/knowledge_base}"
+  local chroma_dir="${RAG_CHROMA_PATH_HOST:-./rag/chroma}"
+  local marker_path="${RAG_INGEST_MARKER:-./rag/.last_ingest}"
+  local current_signature
+  current_signature="$(rag_ingest_signature)"
+
+  case "$ingest_mode_normalized" in
+    always|true|1|yes)
+      return 0
+      ;;
+    never|false|0|no|skip)
+      return 1
+      ;;
+    changed|auto)
+      if [ ! -f "$marker_path" ]; then
+        return 0
+      fi
+      if [ "$(cat "$marker_path" 2>/dev/null || true)" != "$current_signature" ]; then
+        return 0
+      fi
+      if [ ! -d "$chroma_dir" ] || [ -z "$(find "$chroma_dir" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+        return 0
+      fi
+      if [ ! -d "$knowledge_dir" ]; then
+        echo "Knowledge directory not found on host: $knowledge_dir"
+        echo "  Set RAG_KNOWLEDGE_DIR_HOST if you use a custom mounted directory."
+        return 1
+      fi
+      if find "$knowledge_dir" -type f \( \
+        -name '*.md' -o \
+        -name '*.txt' -o \
+        -name '*.html' -o \
+        -name '*.htm' -o \
+        -name '*.json' -o \
+        -name '*.csv' \
+      \) -newer "$marker_path" -print -quit | grep -q .; then
+        return 0
+      fi
+      return 1
+      ;;
+    *)
+      echo "ERROR: RAG_INGEST_MODE must be one of: always, changed, never."
+      exit 1
+      ;;
+  esac
+}
+
 echo ""
 echo "Services:"
 echo "  • Frontend      → http://localhost:3000"
@@ -85,35 +191,33 @@ else
   echo "  • SIP           → disabled (set SIP_ENABLED=true to enable)"
 fi
 if [ "${RAG_ENABLED:-true}" = "true" ]; then
-  echo "  • RAG           → enabled (will ingest knowledge base at startup)"
+  echo "  • RAG           → enabled (ingest mode: ${RAG_INGEST_MODE:-changed})"
 else
   echo "  • RAG           → disabled"
 fi
+echo "  • Build mode    → ${BUILD_IMAGES:-missing}"
+echo "  • Build logs    → ${BUILD_PROGRESS:-plain}"
 echo ""
 
-# Build images first if needed (silent, in background)
 echo "Preparing containers..."
-docker compose \
-  "${COMPOSE_FILES[@]}" \
-  "${COMPOSE_ARGS[@]}" \
-  --env-file .env.local \
-  build --quiet
+build_images_if_needed
 
 # Ingest RAG knowledge base if enabled
 if [ "${RAG_ENABLED:-true}" = "true" ]; then
-  echo ""
-  echo "Ingesting knowledge base into Chroma..."
-  docker compose \
-    "${COMPOSE_FILES[@]}" \
-    "${COMPOSE_ARGS[@]}" \
-    --env-file .env.local \
-    run --rm livekit_agent python src/ingest_rag.py
-  echo ""
+  if should_ingest_rag; then
+    echo ""
+    echo "Ingesting knowledge base into Chroma..."
+    compose_cmd run --rm livekit_agent uv run python src/ingest_rag.py
+    mkdir -p "$(dirname "${RAG_INGEST_MARKER:-./rag/.last_ingest}")"
+    rag_ingest_signature > "${RAG_INGEST_MARKER:-./rag/.last_ingest}"
+    echo ""
+  else
+    echo ""
+    echo "RAG knowledge base unchanged; skipping ingest."
+    echo "  Set RAG_INGEST_MODE=always to force ingestion."
+    echo ""
+  fi
 fi
 
 # Start all services
-docker compose \
-  "${COMPOSE_FILES[@]}" \
-  "${COMPOSE_ARGS[@]}" \
-  --env-file .env.local \
-  up "$@"
+compose_cmd up "$@"

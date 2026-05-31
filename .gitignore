@@ -1,6 +1,8 @@
 venv/
 venv_temp/
 inference/llama/models/
+rag/chroma/
+rag/.last_ingest
 
 # Environment files with machine-specific config
 .env

@@ -35,22 +35,21 @@ RUN apt-get update && apt-get install -y \
 # Create a new directory for our application code
 # And set it as the working directory
 WORKDIR /app
+RUN chown appuser:appuser /app
+USER appuser
 
 # Copy just the dependency files first, for more efficient layer caching
-COPY pyproject.toml uv.lock ./
+COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 RUN mkdir -p src
 
 # Install Python dependencies using UV's lock file
 # --locked ensures we use exact versions from uv.lock for reproducible builds
+# --no-dev keeps test/lint tooling out of the runtime image
 # This creates a virtual environment and installs all dependencies
 # Ensure your uv.lock file is checked in for consistency across environments
-RUN uv sync --locked
-
-# Change ownership of the app directory so the non-privileged user can run downloads
-RUN chown -R appuser:appuser /app
-
-# Switch to the non-privileged user
-USER appuser
+RUN --mount=type=cache,target=/app/.cache/uv,uid=10001,gid=10001 \
+    UV_CACHE_DIR=/app/.cache/uv \
+    uv sync --locked --no-dev
 
 # Pre-download any ML models or files the agent needs
 # We do this before copying the application code to cache the download step
