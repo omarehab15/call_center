@@ -50,7 +50,16 @@ services:
       - STT_API_KEY=no-key-needed
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - TTS_VOICE=${TTS_VOICE:-fahad}
+      - TTS_VOICE=${TTS_VOICE:-fahad}      - RAG_ENABLED=${RAG_ENABLED:-true}
+      - RAG_CHROMA_PATH=${RAG_CHROMA_PATH:-/app/rag/chroma}
+      - RAG_COLLECTION_NAME=${RAG_COLLECTION_NAME:-call_center_knowledge}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-BAAI/bge-m3}
+      - RAG_TOP_K=${RAG_TOP_K:-4}
+      - RAG_MAX_CONTEXT_CHARS=${RAG_MAX_CONTEXT_CHARS:-1800}
+      - RAG_EMBEDDING_DEVICE=${RAG_EMBEDDING_DEVICE:-}
+      - RAG_KNOWLEDGE_DIR=${RAG_KNOWLEDGE_DIR:-/app/knowledge_base}    volumes:
+      - ./rag/chroma:/app/rag/chroma
+      - ./livekit_agent/knowledge_base:/app/knowledge_base
     depends_on:
       livekit:
         condition: service_started

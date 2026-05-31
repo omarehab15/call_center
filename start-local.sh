@@ -84,10 +84,36 @@ if [ "${SIP_ENABLED:-false}" = "true" ] || [ "${SIP_TEST_PROFILE:-}" = "vast" ];
 else
   echo "  • SIP           → disabled (set SIP_ENABLED=true to enable)"
 fi
+if [ "${RAG_ENABLED:-true}" = "true" ]; then
+  echo "  • RAG           → enabled (will ingest knowledge base at startup)"
+else
+  echo "  • RAG           → disabled"
+fi
 echo ""
 
+# Build images first if needed (silent, in background)
+echo "Preparing containers..."
 docker compose \
   "${COMPOSE_FILES[@]}" \
   "${COMPOSE_ARGS[@]}" \
   --env-file .env.local \
-  up --build "$@"
+  build --quiet
+
+# Ingest RAG knowledge base if enabled
+if [ "${RAG_ENABLED:-true}" = "true" ]; then
+  echo ""
+  echo "Ingesting knowledge base into Chroma..."
+  docker compose \
+    "${COMPOSE_FILES[@]}" \
+    "${COMPOSE_ARGS[@]}" \
+    --env-file .env.local \
+    run --rm livekit_agent python src/ingest_rag.py
+  echo ""
+fi
+
+# Start all services
+docker compose \
+  "${COMPOSE_FILES[@]}" \
+  "${COMPOSE_ARGS[@]}" \
+  --env-file .env.local \
+  up "$@"

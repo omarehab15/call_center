@@ -1,32 +1,40 @@
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    AudioConfig,
     BackgroundAudioPlayer,
     BuiltinAudioClip,
-    AudioConfig,
+    ChatContext,
+    ChatMessage,
     JobContext,
     JobProcess,
+    RunContext,
     cli,
     function_tool,
-    RunContext,
 )
 from livekit.plugins import silero, openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import stt as stt_module
+from rag import RagRetriever, build_rag_from_env
 
 logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
 
 class Assistant(Agent):
-    def __init__(self, call_id: str = "local_call") -> None:
+    def __init__(
+        self,
+        call_id: str = "local_call",
+        rag_retriever: Optional[RagRetriever] = None,
+    ) -> None:
         self.call_id = call_id
+        self.rag_retriever = rag_retriever
         self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
 
         القاعدة الأولى — حفظ المعلومات فوراً:
@@ -40,6 +48,7 @@ class Assistant(Agent):
         قواعد المحادثة:
         أجب دائماً بلهجة سعودية نجدية بشكل مباشر وواضح.
         قصّر إجاباتك قدر الإمكان — جملة أو جملتين كحد أقصى في معظم الأحيان.
+        إذا وصلت لك معلومات من قاعدة المعرفة في سياق المحادثة، استخدمها فقط إذا كانت مرتبطة بسؤال العميل ولا تخترع تفاصيل غير موجودة فيها.
         لا تستخدم تنسيقات أو رموز أو مقدمات فارغة مثل بالتأكيد أو حسناً.
         كن ودوداً ومباشراً."""
         super().__init__(
@@ -54,6 +63,37 @@ class Assistant(Agent):
                 "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
                 "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
                 "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
+            ),
+        )
+
+    async def on_user_turn_completed(
+        self,
+        turn_ctx: ChatContext,
+        new_message: ChatMessage,
+    ) -> None:
+        if self.rag_retriever is None:
+            return
+
+        query = _message_text(new_message)
+        if not query:
+            return
+
+        try:
+            rag_content = await self.rag_retriever.retrieve(query)
+        except Exception:
+            logger.exception("RAG lookup failed")
+            return
+
+        rag_content = rag_content.strip()
+        if not rag_content:
+            return
+
+        turn_ctx.add_message(
+            role="assistant",
+            content=(
+                "معلومات من قاعدة المعرفة قد تساعد في الرد التالي. "
+                "استخدمها فقط إذا كانت مرتبطة بسؤال العميل، ولا تذكرها كمصدر داخلي:\n"
+                f"{rag_content}"
             ),
         )
 
@@ -95,6 +135,11 @@ server = AgentServer()
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
+    try:
+        proc.userdata["rag_retriever"] = build_rag_from_env()
+    except Exception:
+        logger.exception("Failed to initialize RAG; continuing without it")
+        proc.userdata["rag_retriever"] = None
 
 server.setup_fnc = prewarm
 
@@ -104,7 +149,7 @@ async def my_agent(ctx: JobContext):
         "room": ctx.room.name,
     }
 
-    groq_llm_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+    groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
 
     stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
     if stt_provider == "whisper":
@@ -170,11 +215,22 @@ async def my_agent(ctx: JobContext):
     
 
     await session.start(
-        agent=Assistant(call_id=ctx.room.name),
+        agent=Assistant(
+            call_id=ctx.room.name,
+            rag_retriever=ctx.proc.userdata.get("rag_retriever"),
+        ),
         room=ctx.room,
     )
     
     await background_audio.start(room=ctx.room, agent_session=session)
+
+def _message_text(message: Any) -> str:
+    text_content = getattr(message, "text_content", "")
+    if callable(text_content):
+        text_content = text_content()
+    if isinstance(text_content, list):
+        return "\n".join(str(part) for part in text_content if part).strip()
+    return str(text_content or "").strip()
 
 if __name__ == "__main__":
     cli.run_app(server)
