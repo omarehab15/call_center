@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
 from livekit import api
 from livekit.api.sip_service import SipService
+from livekit.api.twirp_client import TwirpError, TwirpErrorCode
 from livekit.protocol.sip import (
     CreateSIPDispatchRuleRequest,
     CreateSIPInboundTrunkRequest,
@@ -41,6 +42,10 @@ class SIPConfig:
     dispatch_rule_name: str = "route-to-agent-room"
     call_to: Optional[str] = None
     wait_until_answered: bool = True
+
+
+class UserFacingError(RuntimeError):
+    pass
 
 
 def _load_env_files() -> None:
@@ -97,6 +102,30 @@ def _validate_sip_provider_config(provider_number: str, outbound_host: str) -> N
             "SIP_OUTBOUND_HOST looks like a phone number. "
             "Set it to your provider trunk domain/host (for example: sip.provider.com)."
         )
+
+
+def _is_sip_service_unavailable(error: TwirpError) -> bool:
+    return (
+        error.code == TwirpErrorCode.UNAVAILABLE
+        and error.status == 503
+        and "no response from servers" in error.message.lower()
+    )
+
+
+def _sip_service_unavailable_message(config: SIPConfig) -> str:
+    return (
+        "LiveKit accepted the SIP trunk setup, but no LiveKit SIP service "
+        "responded when placing the outbound call.\n\n"
+        "For this repo, start the optional SIP profile from the repository root "
+        "and retry the call:\n"
+        '  $env:SIP_ENABLED="true"\n'
+        "  bash ./start-local.sh\n\n"
+        "Or start it directly with Docker Compose:\n"
+        "  docker compose -f docker-compose.local.yml --profile sip "
+        "--env-file .env.local up --build\n\n"
+        "Then confirm a livekit/sip container is running and registered with "
+        f"the same LiveKit server ({config.livekit_url})."
+    )
 
 
 def _build_config(args: argparse.Namespace) -> SIPConfig:
@@ -263,14 +292,20 @@ async def start_outbound_call(
     outbound_trunk_id: str,
     call_to: str,
 ) -> None:
-    participant = await sip_client.create_sip_participant(
-        CreateSIPParticipantRequest(
-            sip_trunk_id=outbound_trunk_id,
-            sip_call_to=call_to,
-            room_name=config.room_name,
-            wait_until_answered=config.wait_until_answered,
+    try:
+        participant = await sip_client.create_sip_participant(
+            CreateSIPParticipantRequest(
+                sip_trunk_id=outbound_trunk_id,
+                sip_call_to=call_to,
+                room_name=config.room_name,
+                wait_until_answered=config.wait_until_answered,
+            )
         )
-    )
+    except TwirpError as exc:
+        if _is_sip_service_unavailable(exc):
+            raise UserFacingError(_sip_service_unavailable_message(config)) from exc
+        raise
+
     print(
         "Outbound call started. "
         f"Participant ID: {participant.participant_id} "
@@ -385,4 +420,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (UserFacingError, ValueError) as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
