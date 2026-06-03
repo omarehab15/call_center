@@ -124,10 +124,14 @@ build_images_if_needed() {
 }
 
 rag_ingest_signature() {
-  printf 'provider=%s\nmodel=%s\ncollection=%s\n' \
+  printf 'provider=%s\nmodel=%s\ncollection=%s\nknowledge_dir=%s\nchroma_dir=%s\nchunk_size=%s\nchunk_overlap=%s\n' \
     "${RAG_EMBEDDING_PROVIDER:-chroma}" \
     "${RAG_EMBEDDING_MODEL:-}" \
-    "${RAG_COLLECTION_NAME:-}"
+    "${RAG_COLLECTION_NAME:-}" \
+    "${RAG_KNOWLEDGE_DIR_HOST:-./livekit_agent/knowledge_base}" \
+    "${RAG_CHROMA_PATH_HOST:-./rag/chroma}" \
+    "${RAG_CHUNK_SIZE:-900}" \
+    "${RAG_CHUNK_OVERLAP:-150}"
 }
 
 should_ingest_rag() {

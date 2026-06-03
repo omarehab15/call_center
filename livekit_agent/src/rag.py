@@ -339,8 +339,12 @@ def run_ingest_cli() -> None:
         help="Directory containing .md, .txt, .html, .json, or .csv knowledge files.",
     )
     parser.add_argument("--reset", action="store_true", help="Recreate the collection.")
-    parser.add_argument("--chunk-size", type=int, default=900)
-    parser.add_argument("--chunk-overlap", type=int, default=150)
+    parser.add_argument("--chunk-size", type=int, default=_env_int("RAG_CHUNK_SIZE", 900))
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=_env_int("RAG_CHUNK_OVERLAP", 150),
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
