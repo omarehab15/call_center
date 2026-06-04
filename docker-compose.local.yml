@@ -4,7 +4,7 @@
 # STT runs on a remote machine (via Tailscale), LLM + TTS via Groq cloud
 #
 # Usage:
-#   docker compose -f docker-compose.local.yml --env-file .env.local up --build
+#   docker compose -f docker-compose.local.yml --env-file .env.local up --build -d
 
 services:
   redis:
@@ -32,14 +32,25 @@ services:
     image: livekit/sip:latest
     profiles:
       - sip
-    # For Linux production deployments, host networking is often preferred for SIP/RTP:
-    # network_mode: host
-    # If you enable host networking, remove the explicit ports mapping below.
-    ports:
-      - "${SIP_SIGNALING_PORT:-5060}:5060/udp"
-      - "${SIP_SIGNALING_PORT:-5060}:5060/tcp"
-      - "${SIP_TLS_PORT:-5061}:5061/tcp"
-      - "${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-20000}:${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-20000}/udp"
+    # FIX: No host port mappings for SIP/RTP at all.
+    #
+    # WHY: Docker Desktop on Windows allocates a kernel proxy thread per mapped
+    # UDP port. Even 200 ports caused a ~220 s hang during container startup.
+    # The only real fix is to remove the port mappings entirely.
+    #
+    # HOW IT STILL WORKS: The SIP container sits on the same Docker bridge
+    # network (local_network) as LiveKit and Redis. All internal signalling
+    # and RTP traffic flows over that bridge — no host mapping needed.
+    #
+    # LIMITATION: Inbound calls from the PSTN can't reach the container
+    # directly because port 5060 is not exposed on the host. For local dev /
+    # outbound-only testing (sip_setup.py --call-now) this is fine.
+    # If you need inbound calls, add only the SIP signalling port:
+    #   ports:
+    #     - "5060:5060/udp"
+    #     - "5060:5060/tcp"
+    # and keep RTP unmapped (outbound RTP works via NAT through Docker bridge).
+    stop_grace_period: 5s
     environment:
       SIP_CONFIG_BODY: |
         api_key: '${LIVEKIT_API_KEY:-devkey}'
@@ -48,8 +59,8 @@ services:
         redis:
           address: 'redis:6379'
         sip_port: 5060
-        rtp_port: ${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-20000}
-        use_external_ip: ${SIP_USE_EXTERNAL_IP:-true}
+        rtp_port: ${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-10200}
+        use_external_ip: ${SIP_USE_EXTERNAL_IP:-false}
         logging:
           level: ${SIP_LOG_LEVEL:-info}
     networks:
@@ -86,6 +97,7 @@ services:
     depends_on:
       livekit:
         condition: service_started
+    stop_grace_period: 5s
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8081/ > /dev/null"]
       interval: 5s
@@ -105,6 +117,7 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
+    stop_grace_period: 5s
     depends_on:
       livekit:
         condition: service_started

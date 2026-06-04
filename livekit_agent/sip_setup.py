@@ -1,6 +1,9 @@
 import argparse
 import asyncio
 import os
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -112,21 +115,102 @@ def _is_sip_service_unavailable(error: TwirpError) -> bool:
     )
 
 
+# ── SIP container helpers ────────────────────────────────────────────────────
+
+def _is_sip_container_running() -> bool:
+    """Return True if a livekit/sip container is currently running."""
+    if not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "ancestor=livekit/sip", "--format", "{{.ID}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _start_sip_container() -> bool:
+    """
+    Start the SIP docker-compose profile in detached mode.
+    Looks for docker-compose.local.yml two levels up from this file.
+    Returns True if docker compose exited successfully.
+    """
+    if not shutil.which("docker"):
+        print("  WARNING: 'docker' not found on PATH; cannot auto-start SIP container.")
+        return False
+
+    repo_root = Path(__file__).resolve().parent.parent
+    compose_file = repo_root / "docker-compose.local.yml"
+    env_file = repo_root / ".env.local"
+
+    if not compose_file.exists():
+        print(f"  WARNING: {compose_file} not found; cannot auto-start SIP container.")
+        return False
+
+    cmd = ["docker", "compose", "-f", str(compose_file)]
+    if env_file.exists():
+        cmd += ["--env-file", str(env_file)]
+    cmd += ["--profile", "sip", "up", "--build", "-d", "sip"]
+
+    print("  Starting SIP container (detached):")
+    print("  $", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, timeout=120)
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        print("  ERROR: docker compose timed out after 120 s.")
+        return False
+    except Exception as exc:
+        print(f"  ERROR: docker compose failed: {exc}")
+        return False
+
+
+def _ensure_sip_container_running() -> None:
+    """
+    Check whether the livekit/sip container is up.
+    If not, attempt to start it automatically via docker compose.
+    Prints status either way; does not raise (the real call will fail
+    with a clear error if the container still isn't up).
+    """
+    if _is_sip_container_running():
+        print("✓ SIP container is already running.")
+        return
+
+    print("⚠  No running livekit/sip container detected.")
+    print("   Attempting to start the SIP profile automatically...")
+    success = _start_sip_container()
+    if success:
+        print("✓ SIP container started. Waiting 3 s for it to register...")
+        import time
+        time.sleep(3)
+    else:
+        print(
+            "  Could not auto-start the SIP container.\n"
+            "  Start it manually, then retry:\n"
+            "    docker compose -f docker-compose.local.yml --profile sip "
+            "--env-file .env.local up --build -d"
+        )
+
+
 def _sip_service_unavailable_message(config: SIPConfig) -> str:
     return (
         "LiveKit accepted the SIP trunk setup, but no LiveKit SIP service "
         "responded when placing the outbound call.\n\n"
-        "For this repo, start the optional SIP profile from the repository root "
-        "and retry the call:\n"
-        '  $env:SIP_ENABLED="true"\n'
-        "  bash ./start-local.sh\n\n"
-        "Or start it directly with Docker Compose:\n"
+        "Make sure the SIP container is running and registered with "
+        f"the same LiveKit server ({config.livekit_url}).\n\n"
+        "Start it manually from the repository root:\n"
         "  docker compose -f docker-compose.local.yml --profile sip "
-        "--env-file .env.local up --build\n\n"
-        "Then confirm a livekit/sip container is running and registered with "
-        f"the same LiveKit server ({config.livekit_url})."
+        "--env-file .env.local up --build -d\n\n"
+        "Then retry:\n"
+        "  uv run python sip_setup.py setup --call-now --call-to <number>"
     )
 
+
+# ── Config ───────────────────────────────────────────────────────────────────
 
 def _build_config(args: argparse.Namespace) -> SIPConfig:
     call_to = args.call_to if args.call_to is not None else os.getenv("SIP_CALL_TO")
@@ -159,6 +243,8 @@ def _build_config(args: argparse.Namespace) -> SIPConfig:
         ),
     )
 
+
+# ── LiveKit SIP helpers ──────────────────────────────────────────────────────
 
 async def _find_inbound_trunk_by_name(sip_client: SipService, name: str):
     response = await sip_client.list_inbound_trunk(ListSIPInboundTrunkRequest())
@@ -292,6 +378,9 @@ async def start_outbound_call(
     outbound_trunk_id: str,
     call_to: str,
 ) -> None:
+    # ── Auto-start SIP container if not running ──────────────────────────────
+    _ensure_sip_container_running()
+
     try:
         participant = await sip_client.create_sip_participant(
             CreateSIPParticipantRequest(
@@ -312,6 +401,8 @@ async def start_outbound_call(
         f"(room={config.room_name}, to={call_to})"
     )
 
+
+# ── Top-level commands ───────────────────────────────────────────────────────
 
 async def run_setup(config: SIPConfig, *, place_call: bool) -> None:
     lkapi = api.LiveKitAPI(
@@ -361,6 +452,8 @@ async def run_call_only(config: SIPConfig) -> None:
     finally:
         await lkapi.aclose()
 
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(

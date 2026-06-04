@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # start-local.sh — Run this on your local machine
 # Starts local web stack: Redis + LiveKit + agent + frontend
-# SIP is optional and can be enabled separately.
-# The agent connects to remote STT on the vast.ai machine via Tailscale
+# SIP is optional and can be enabled via SIP_ENABLED=true.
+#
+# FIX: Now starts in detached mode (-d) by default so Ctrl+C does NOT
+#      kill the containers or corrupt your terminal.
+#
+# To watch live logs after starting:
+#   docker compose -f docker-compose.local.yml logs -f
+#
+# To stop cleanly:
+#   docker compose -f docker-compose.local.yml --profile sip down
 set -euo pipefail
 
 # Load .env.local to read STT endpoint and runtime config
@@ -223,5 +231,15 @@ if [ "${RAG_ENABLED:-true}" = "true" ]; then
   fi
 fi
 
-# Start all services
-compose_cmd up "$@"
+# ── FIX: Start detached so Ctrl+C doesn't kill containers or break terminal ──
+echo "Starting containers in detached mode (background)..."
+compose_cmd up --build -d "$@"
+
+echo ""
+echo "========================================"
+echo "  Stack is running in the background"
+echo "========================================"
+echo ""
+echo "  Watch logs:   docker compose -f docker-compose.local.yml logs -f"
+echo "  Stop cleanly: docker compose -f docker-compose.local.yml$([ "${SIP_ENABLED:-false}" = "true" ] && echo " --profile sip") down"
+echo ""
