@@ -40,19 +40,28 @@ RUN --mount=type=cache,target=/app/.cache/uv,uid=10001,gid=10001 \
     UV_CACHE_DIR=/app/.cache/uv \
     uv sync --locked --no-dev
 
-# FIX: Pre-download only the silero VAD ONNX model file.
-# - silero.VAD.load() downloads the ONNX model so it's baked into the image.
-# - MultilingualModel() is intentionally excluded: it requires a live job
-#   context (get_job_context()) and raises RuntimeError outside one. Its
-#   model files are downloaded automatically on first job startup instead.
-# - The old Plugin.registered_plugins loop is also removed because it called
-#   download_files() on livekit-plugins-ai-coustics and
-#   livekit-plugins-noise-cancellation, which contact external APIs at build
-#   time and can hang or fail in offline / CI environments.
+# FIX: Pre-download model files needed at runtime.
+#
+# silero.VAD.load()
+#   Downloads the silero ONNX model (~2 MB) into the HF cache.
+#
+# _EUORunnerMultilingual._download_files()
+#   Downloads the turn-detector multilingual model files:
+#     - model_q8.onnx   (~45 MB)
+#     - languages.json  (~2 KB)
+#     - tokenizer files (~1 MB)
+#   This is the internal classmethod that downloads without needing a
+#   job context (unlike MultilingualModel() which calls get_job_context()
+#   and raises RuntimeError at build time).
+#
+# ai-coustics and noise-cancellation are intentionally excluded — they
+# contact external licensing APIs at build time and hang in CI/offline envs.
 RUN uv run python -c "\
 from livekit.plugins import silero; \
+from livekit.plugins.turn_detector.multilingual import _EUORunnerMultilingual; \
 silero.VAD.load(); \
-print('Silero VAD model pre-download complete.')"
+_EUORunnerMultilingual._download_files(); \
+print('All model files pre-downloaded successfully.')"
 
 # Copy all remaining application files
 COPY --chown=appuser:appuser . .

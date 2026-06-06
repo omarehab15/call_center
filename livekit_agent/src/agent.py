@@ -22,6 +22,7 @@ from livekit.plugins import silero, openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import stt as stt_module
 from rag import RagRetriever, build_rag_from_env
+from call_logger import CallLogger
 
 logger = logging.getLogger("agent")
 
@@ -35,6 +36,12 @@ class Assistant(Agent):
     ) -> None:
         self.call_id = call_id
         self.rag_retriever = rag_retriever
+        
+        # Initialize CallLogger with correct path
+        # Use environment variable or default to relative path
+        logs_dir = os.getenv("CALL_LOGS", os.path.join(os.path.dirname(__file__), "..", "call_logs"))
+        self.call_logger = CallLogger(call_id, logs_dir=logs_dir)
+        
         self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
 
         القاعدة الأولى — حفظ المعلومات فوراً:
@@ -57,24 +64,31 @@ class Assistant(Agent):
         self.notes = []
 
     async def on_enter(self) -> None:
+        self.call_logger.log_system_event("Call started - Agent initialized")
         await self.session.generate_reply(
             user_input="...",
             instructions=(
-                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية "
-                "ثم اسأله عن اسمه وعن سبب اتصاله بطريقة محترمة. "
-                "يمكنك قول شيء مثل تحية الاسلام او اي تحية اخرى"
+                "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية قول التالى [هلا بيك معك فهد ممكن اعرف اسمك الكريم] "
             ),
         )
+    
+    def log_agent_message(self, message: str):
+        """Log agent message to call logger."""
+        self.call_logger.log_agent_message(message)
 
     async def on_user_turn_completed(
         self,
         turn_ctx: ChatContext,
         new_message: ChatMessage,
     ) -> None:
+        # Log user message
+        query = _message_text(new_message)
+        if query:
+            self.call_logger.log_user_message(query)
+        
         if self.rag_retriever is None:
             return
 
-        query = _message_text(new_message)
         if not query:
             return
 
@@ -115,6 +129,9 @@ class Assistant(Agent):
         """
         logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
         self.notes.append(note)
+        
+        # Log note using CallLogger
+        self.call_logger.log_note(note)
         
         debug_path = os.path.join(os.path.dirname(__file__), f"{self.call_id}_notes.txt")
         try:
@@ -205,24 +222,41 @@ async def my_agent(ctx: JobContext):
 
     await ctx.connect()
 
-    background_audio = BackgroundAudioPlayer(
-        ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
-        # thinking_sound=[
-        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
-        #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
-        # ],
-    )
+    # background_audio = BackgroundAudioPlayer(
+    #     ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
+    #     # thinking_sound=[
+    #     #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
+    #     #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
+    #     # ],
+    # )
     
+    assistant = Assistant(
+        call_id=ctx.room.name,
+        rag_retriever=ctx.proc.userdata.get("rag_retriever"),
+    )
 
-    await session.start(
-        agent=Assistant(
-            call_id=ctx.room.name,
-            rag_retriever=ctx.proc.userdata.get("rag_retriever"),
-        ),
-        room=ctx.room,
-    )
+    # Wrap session.generate_reply to log agent messages
+    original_generate_reply = session.generate_reply
     
-    await background_audio.start(room=ctx.room, agent_session=session)
+    async def wrapped_generate_reply(*args, **kwargs):
+        result = await original_generate_reply(*args, **kwargs)
+        # Log the generated response
+        if result:
+            assistant.log_agent_message(str(result))
+        return result
+    
+    session.generate_reply = wrapped_generate_reply
+
+    try:
+        await session.start(
+            agent=assistant,
+            room=ctx.room,
+        )
+    finally:
+        # Save call summary when call ends
+        assistant.call_logger.log_call_summary(assistant.notes)
+    
+    # await background_audio.start(room=ctx.room, agent_session=session)
 
 def _message_text(message: Any) -> str:
     text_content = getattr(message, "text_content", "")
