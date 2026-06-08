@@ -10,3 +10,5 @@ KMS
 *.egg-info
 .pytest_cache
 .ruff_cache
+call_logs/*.txt
+!call_logs/README.md

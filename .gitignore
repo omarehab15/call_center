@@ -3,6 +3,7 @@ venv_temp/
 inference/llama/models/
 rag/chroma/
 rag/.last_ingest
+.docker-build-signatures/
 
 # Environment files with machine-specific config
 .env

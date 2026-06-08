@@ -23,6 +23,7 @@ coverage/
 *.tgz
 .tmp
 .cache
+call_logs/
 
 # Environment variables
 .env

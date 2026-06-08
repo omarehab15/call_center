@@ -70,6 +70,7 @@ fi
 
 COMPOSE_FILES=(-f docker-compose.local.yml)
 COMPOSE_ARGS=()
+RECREATE_SERVICES=()
 if [ "${SIP_ENABLED:-false}" = "true" ]; then
   COMPOSE_ARGS+=(--profile sip)
 fi
@@ -90,21 +91,135 @@ compose_cmd() {
     "$@"
 }
 
+service_build_context() {
+  case "$1" in
+    livekit_agent) echo "./livekit_agent" ;;
+    frontend) echo "./frontend" ;;
+    *)
+      echo "ERROR: Unknown build service: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+service_signature_marker() {
+  echo ".docker-build-signatures/$1.sha256"
+}
+
+service_build_signature() {
+  local service="$1"
+  local context
+  context="$(service_build_context "$service")"
+
+  if ! command -v sha256sum > /dev/null 2>&1; then
+    echo "ERROR: sha256sum is required for BUILD_IMAGES=changed." >&2
+    exit 1
+  fi
+
+  (
+    cd "$context"
+    find . -type f \
+      ! -path '*/.git/*' \
+      ! -path '*/.venv/*' \
+      ! -path '*/venv/*' \
+      ! -path '*/node_modules/*' \
+      ! -path '*/.next/*' \
+      ! -path '*/out/*' \
+      ! -path '*/dist/*' \
+      ! -path '*/build/*' \
+      ! -path '*/.pytest_cache/*' \
+      ! -path '*/.ruff_cache/*' \
+      ! -path '*/__pycache__/*' \
+      ! -path '*/.cache/*' \
+      ! -path '*/call_logs/*' \
+      ! -name '*.pyc' \
+      -print0 |
+      sort -z |
+      while IFS= read -r -d '' file; do
+        printf '%s\n' "$file"
+        sha256sum "$file"
+      done
+  ) | sha256sum | awk '{print $1}'
+}
+
+record_build_signatures() {
+  local service
+  mkdir -p .docker-build-signatures
+  for service in "$@"; do
+    service_build_signature "$service" > "$(service_signature_marker "$service")"
+  done
+}
+
+remember_running_services_for_recreate() {
+  local service
+  local container_id
+  for service in "$@"; do
+    container_id="$(compose_cmd ps -a -q "$service" 2>/dev/null || true)"
+    if [ -n "$container_id" ]; then
+      RECREATE_SERVICES+=("$service")
+    fi
+  done
+}
+
+build_and_record_services() {
+  local build_progress="$1"
+  shift
+  local services=("$@")
+
+  if [ "${#services[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  remember_running_services_for_recreate "${services[@]}"
+  compose_cmd build --progress "$build_progress" "${services[@]}"
+  record_build_signatures "${services[@]}"
+}
+
 build_images_if_needed() {
-  local build_mode="${BUILD_IMAGES:-missing}"
+  local build_mode="${BUILD_IMAGES:-changed}"
   local build_mode_normalized="${build_mode,,}"
   local build_progress="${BUILD_PROGRESS:-plain}"
   local build_services=(livekit_agent frontend)
   local missing_services=()
+  local changed_services=()
   local service
   local image_id
+  local marker_path
+  local previous_signature
+  local current_signature
 
   case "$build_mode_normalized" in
     always|true|1|yes)
       echo "Building images..."
-      compose_cmd build --progress "$build_progress" "${build_services[@]}"
+      build_and_record_services "$build_progress" "${build_services[@]}"
       ;;
-    missing|auto)
+    changed|auto)
+      for service in "${build_services[@]}"; do
+        image_id="$(compose_cmd images -q "$service" 2>/dev/null || true)"
+        marker_path="$(service_signature_marker "$service")"
+        previous_signature="$(cat "$marker_path" 2>/dev/null || true)"
+        current_signature="$(service_build_signature "$service")"
+
+        if [ -z "$image_id" ]; then
+          changed_services+=("$service")
+          continue
+        fi
+        if [ "$previous_signature" != "$current_signature" ]; then
+          changed_services+=("$service")
+        fi
+      done
+
+      if [ "${#changed_services[@]}" -gt 0 ]; then
+        echo "Building changed images: ${changed_services[*]}"
+        build_and_record_services "$build_progress" "${changed_services[@]}"
+      else
+        echo "Build contexts unchanged; skipping image build."
+        echo "  Set BUILD_IMAGES=always to force a rebuild."
+        echo "  Set BUILD_IMAGES=missing to build only missing images."
+        echo "  Set BUILD_PROGRESS=plain to show full build steps."
+      fi
+      ;;
+    missing)
       for service in "${build_services[@]}"; do
         image_id="$(compose_cmd images -q "$service" 2>/dev/null || true)"
         if [ -z "$image_id" ]; then
@@ -114,10 +229,11 @@ build_images_if_needed() {
 
       if [ "${#missing_services[@]}" -gt 0 ]; then
         echo "Building missing images: ${missing_services[*]}"
-        compose_cmd build --progress "$build_progress" "${missing_services[@]}"
+        build_and_record_services "$build_progress" "${missing_services[@]}"
       else
         echo "Images already exist; skipping build."
         echo "  Set BUILD_IMAGES=always to force a rebuild."
+        echo "  Set BUILD_IMAGES=changed to rebuild after code changes."
         echo "  Set BUILD_PROGRESS=plain to show full build steps."
       fi
       ;;
@@ -125,7 +241,7 @@ build_images_if_needed() {
       echo "Skipping image build (BUILD_IMAGES=$build_mode)."
       ;;
     *)
-      echo "ERROR: BUILD_IMAGES must be one of: always, missing, never."
+      echo "ERROR: BUILD_IMAGES must be one of: always, changed, missing, never."
       exit 1
       ;;
   esac
@@ -207,7 +323,7 @@ if [ "${RAG_ENABLED:-true}" = "true" ]; then
 else
   echo "  • RAG           → disabled"
 fi
-echo "  • Build mode    → ${BUILD_IMAGES:-missing}"
+echo "  • Build mode    → ${BUILD_IMAGES:-changed}"
 echo "  • Build logs    → ${BUILD_PROGRESS:-plain}"
 echo ""
 
@@ -219,7 +335,7 @@ if [ "${RAG_ENABLED:-true}" = "true" ]; then
   if should_ingest_rag; then
     echo ""
     echo "Ingesting knowledge base into Chroma..."
-    compose_cmd run --rm livekit_agent uv run python src/ingest_rag.py
+    compose_cmd run --rm --no-deps livekit_agent uv run python src/ingest_rag.py
     mkdir -p "$(dirname "${RAG_INGEST_MARKER:-./rag/.last_ingest}")"
     rag_ingest_signature > "${RAG_INGEST_MARKER:-./rag/.last_ingest}"
     echo ""
@@ -231,9 +347,15 @@ if [ "${RAG_ENABLED:-true}" = "true" ]; then
   fi
 fi
 
-# ── Start detached — images already built above, no rebuild needed ───────────
+# ── Start detached — unchanged containers are left alone ─────────────────────
+# --no-recreate starts missing containers without touching healthy existing ones.
+# Services with newly built images are recreated explicitly just below.
 echo "Starting containers in detached mode (background)..."
-compose_cmd up -d "$@"
+compose_cmd up -d --no-recreate "$@"
+if [ "${#RECREATE_SERVICES[@]}" -gt 0 ]; then
+  echo "Recreating services with updated images: ${RECREATE_SERVICES[*]}"
+  compose_cmd up -d --no-deps --force-recreate "${RECREATE_SERVICES[@]}"
+fi
 
 echo ""
 echo "========================================"

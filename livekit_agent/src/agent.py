@@ -5,21 +5,22 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
-    AgentServer,
     AgentSession,
     ChatContext,
     ChatMessage,
     JobContext,
     JobProcess,
     RunContext,
+    WorkerOptions,
     cli,
     function_tool,
 )
-from livekit.plugins import silero, openai
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import stt as stt_module
-from rag import RagRetriever, build_rag_from_env
+from livekit.plugins import openai, silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
 from call_logger import CallLogger
+from rag import RagRetriever, build_rag_from_env
 
 logger = logging.getLogger("agent")
 
@@ -33,12 +34,13 @@ class Assistant(Agent):
     ) -> None:
         self.call_id = call_id
         self.rag_retriever = rag_retriever
-        
+
         # Initialize CallLogger with correct path
         # Use environment variable or default to relative path
         logs_dir = os.getenv("CALL_LOGS", os.path.join(os.path.dirname(__file__), "..", "call_logs"))
         self.call_logger = CallLogger(call_id, logs_dir=logs_dir)
-        
+        self._summary_written = False
+
         self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
 
         القاعدة الأولى — حفظ المعلومات فوراً:
@@ -68,10 +70,17 @@ class Assistant(Agent):
                 "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية قول التالى [هلا بيك معك فهد ممكن اعرف اسمك الكريم] "
             ),
         )
-    
+
     def log_agent_message(self, message: str):
         """Log agent message to call logger."""
         self.call_logger.log_agent_message(message)
+
+    def finalize_call(self) -> None:
+        """Write the call summary once, when the session/job is actually closing."""
+        if self._summary_written:
+            return
+        self._summary_written = True
+        self.call_logger.log_call_summary(self.notes)
 
     async def on_user_turn_completed(
         self,
@@ -82,7 +91,7 @@ class Assistant(Agent):
         query = _message_text(new_message)
         if query:
             self.call_logger.log_user_message(query)
-        
+
         if self.rag_retriever is None:
             return
 
@@ -138,25 +147,28 @@ class Assistant(Agent):
 
         return "تم حفظ الملاحظة."
 
-server = AgentServer()
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
-    # Load turn-detection model once at startup (not per call)
-    proc.userdata["turn_detector"] = MultilingualModel()
+    # MultilingualModel requires a JobContext, so create it inside my_agent.
+    # The Dockerfile pre-downloads its model files to keep runtime startup fast.
     try:
         proc.userdata["rag_retriever"] = build_rag_from_env()
     except Exception:
         logger.exception("Failed to initialize RAG; continuing without it")
         proc.userdata["rag_retriever"] = None
 
-server.setup_fnc = prewarm
 
-@server.rtc_session()
 async def my_agent(ctx: JobContext):
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
+    logger.info(
+        "Job received: room=%s job_id=%s agent_name=%s",
+        ctx.room.name,
+        ctx.job.id,
+        ctx.job.agent_name,
+    )
 
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
 
@@ -191,6 +203,8 @@ async def my_agent(ctx: JobContext):
 
     logger.info("TTS voice=%s", tts_voice)
 
+    turn_detector = MultilingualModel()
+
     session = AgentSession(
         stt=stt_module.StreamAdapter(
             stt=openai.STT(
@@ -207,7 +221,7 @@ async def my_agent(ctx: JobContext):
             api_key=os.getenv("GROQ_API_KEY", ""),
         ),
         tts=tts_instance,
-        turn_detection=ctx.proc.userdata["turn_detector"],
+        turn_detection=turn_detector,
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
@@ -219,21 +233,42 @@ async def my_agent(ctx: JobContext):
         rag_retriever=ctx.proc.userdata.get("rag_retriever"),
     )
 
-    @session.on("agent_message")
-    def on_agent_message(message: ChatMessage) -> None:
-        """Called whenever the agent produces a reply — gives us the real text."""
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event: Any) -> None:
+        """Log assistant messages from the session conversation history."""
+        message = getattr(event, "item", None)
+        if getattr(message, "role", None) != "assistant":
+            return
         text = _message_text(message)
         if text:
             assistant.log_agent_message(text)
+
+    @session.on("close")
+    def on_session_close(event: Any) -> None:
+        reason = getattr(event, "reason", "unknown")
+        error = getattr(event, "error", None)
+        assistant.call_logger.log_system_event(f"Session closed: {reason}")
+        if error:
+            assistant.call_logger.log_error(f"Session closed with error: {error}")
+        assistant.finalize_call()
+
+    async def on_job_shutdown(reason: str) -> None:
+        assistant.call_logger.log_system_event(f"Job shutdown: {reason}")
+        assistant.finalize_call()
+
+    ctx.add_shutdown_callback(on_job_shutdown)
 
     try:
         await session.start(
             agent=assistant,
             room=ctx.room,
         )
-    finally:
-        # Save call summary when call ends
-        assistant.call_logger.log_call_summary(assistant.notes)
+    except Exception as exc:
+        logger.exception("Agent session failed")
+        assistant.call_logger.log_error(f"Agent session failed: {exc}")
+        assistant.finalize_call()
+        raise
+
 
 def _message_text(message: Any) -> str:
     text_content = getattr(message, "text_content", "")
@@ -243,5 +278,10 @@ def _message_text(message: Any) -> str:
         return "\n".join(str(part) for part in text_content if part).strip()
     return str(text_content or "").strip()
 
+
 if __name__ == "__main__":
-    cli.run_app(server)
+    cli.run_app(WorkerOptions(
+        entrypoint_fnc=my_agent,
+        prewarm_fnc=prewarm,
+        agent_name=os.getenv("LIVEKIT_AGENT_NAME", "").strip(),
+    ))

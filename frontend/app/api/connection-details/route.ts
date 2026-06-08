@@ -13,6 +13,8 @@ type ConnectionDetails = {
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL ?? process.env.LIVEKIT_URL;
+const DEFAULT_AGENT_NAME =
+  process.env.LIVEKIT_AGENT_NAME || process.env.NEXT_PUBLIC_LIVEKIT_AGENT_NAME;
 
 // don't cache the results
 export const revalidate = 0;
@@ -30,8 +32,11 @@ export async function POST(req: Request) {
     }
 
     // Parse agent configuration from request body
-    const body = await req.json();
-    const agentName: string = body?.room_config?.agents?.[0]?.agent_name;
+    const body = await req.json().catch(() => ({}));
+    const agentName: string | undefined =
+      body?.room_config?.agents?.[0]?.agent_name ??
+      body?.roomConfig?.agents?.[0]?.agentName ??
+      DEFAULT_AGENT_NAME;
 
     // Generate participant token
     const participantName = 'user';

@@ -9,6 +9,7 @@
 services:
   redis:
     image: redis:7-alpine
+    container_name: callcenter_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -16,46 +17,44 @@ services:
       - redis-data:/data
     networks:
       - local_network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
 
   livekit:
     image: livekit/livekit-server:latest
+    container_name: callcenter_livekit
     restart: unless-stopped
     ports:
       - "7880:7880"
       - "7881:7881"
-    # FIX: --node-ip forces LiveKit to advertise its Docker-internal IP
-    # to the SIP container instead of the public IP (156.216.68.22).
-    # Without this, SIP tries to reach LiveKit from outside the Docker
-    # network and RTP from the agent never reaches the SIP container.
     command: --dev --bind "0.0.0.0" --redis-host redis:6379 --node-ip livekit
     depends_on:
       redis:
         condition: service_started
     networks:
       - local_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
   sip:
     image: livekit/sip:latest
+    container_name: callcenter_sip
     restart: unless-stopped
     profiles:
       - sip
-    # PORT MAPPING STRATEGY FOR WINDOWS DOCKER DESKTOP:
-    #
-    # The original 10000-20000 UDP range (10001 ports) caused ~220s hang on
-    # Windows Docker Desktop. The fix is a small fixed RTP window of 32 ports
-    # which is enough for ~16 concurrent SIP calls and binds instantly.
-    #
-    # Port 5060: SIP signaling — required so Twilio/provider can reach us
-    # Port 10000-10031: RTP media — required so audio flows back to caller
-    #
-    # If you still see startup delays, reduce RTP window further or use
-    # SIP_TEST_RTP_PORT_START/END in .env.local to override.
     stop_grace_period: 5s
     ports:
       - "${SIP_SIGNALING_PORT:-5060}:5060/udp"
       - "${SIP_SIGNALING_PORT:-5060}:5060/tcp"
       - "${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-10031}:${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-10031}/udp"
-    
     environment:
       SIP_CONFIG_BODY: |
         api_key: '${LIVEKIT_API_KEY:-devkey}'
@@ -75,10 +74,17 @@ services:
         condition: service_started
       redis:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
 
   livekit_agent:
     build:
       context: ./livekit_agent
+    container_name: callcenter_agent
     restart: unless-stopped
     env_file:
       - .env.local
@@ -87,7 +93,7 @@ services:
       - LIVEKIT_HOST=ws://livekit:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
-      - LIVEKIT_AGENT_PORT=7880
+      - LIVEKIT_AGENT_NAME=${LIVEKIT_AGENT_NAME:-}
       # STT — remote (via Tailscale)
       - STT_PROVIDER=${STT_PROVIDER:-whisper}
       - STT_BASE_URL=${STT_BASE_URL}
@@ -127,6 +133,12 @@ services:
       start_period: 10s
     networks:
       - local_network
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+        reservations:
+          memory: 512M
 
   frontend:
     build:
@@ -139,12 +151,21 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
+      - LIVEKIT_AGENT_NAME=${LIVEKIT_AGENT_NAME:-}
+      # Limit Node.js heap to avoid frontend eating all RAM
+      - NODE_OPTIONS=--max-old-space-size=256
     stop_grace_period: 5s
     depends_on:
       livekit:
         condition: service_started
     networks:
       - local_network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
 volumes:
   redis-data:
