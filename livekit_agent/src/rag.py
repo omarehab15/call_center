@@ -172,6 +172,20 @@ class ChromaRagRetriever:
             n_results=self._config.top_k,
             include=["documents", "metadatas", "distances"],
         )
+        # Log hit summary for debugging
+        docs = _first_result_list(results.get("documents"))
+        distances = _first_result_list(results.get("distances"))
+        hits = len([d for d in docs if d and str(d).strip()])
+        if hits:
+            dist_str = ", ".join(
+                f"{d:.3f}" for d in distances[:hits] if isinstance(d, float)
+            )
+            logger.debug(
+                "RAG hits=%d/%d distances=[%s] query=%r",
+                hits, self._config.top_k, dist_str, query[:80],
+            )
+        else:
+            logger.debug("RAG no hits for query=%r", query[:80])
         return format_rag_results(results, max_chars=self._config.max_context_chars)
 
 

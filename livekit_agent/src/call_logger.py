@@ -1,135 +1,147 @@
+"""
+CallLogger — structured per-call log file for debugging & tracking.
+
+Log format (one line per event):
+    [HH:MM:SS] #SEQ  LEVEL  STAGE  message
+
+LEVEL codes:
+    👤 USER    — caller utterance (after STT)
+    🤖 AGENT   — agent reply (before TTS)
+    📝 NOTE    — data captured by add_note tool
+    🔍 RAG     — RAG retrieval pipeline step
+    ⚙️  SYS     — lifecycle / system events
+    ❌ ERR     — errors / exceptions
+
+STAGE codes tell you exactly where in the pipeline the event happened:
+    STT       — speech-to-text transcription
+    LLM       — language model processing
+    TTS       — text-to-speech synthesis
+    RAG       — knowledge-base retrieval
+    TOOL      — function_tool call
+    LIFECYCLE — call start / end / summary
+    ERROR     — error in any stage
+
+This lets you reconstruct the exact sequence of steps when something goes wrong.
+"""
+
 import logging
 import os
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 from pathlib import Path
 
 logger = logging.getLogger("call_logger")
 
 
 class CallLogger:
-    """Manages readable logging for each room/call session."""
-    
+    """Structured per-call log for debugging the full STT→RAG→LLM→TTS pipeline."""
+
     def __init__(self, room_name: str, logs_dir: str = "call_logs"):
-        """
-        Initialize CallLogger for a specific room.
-        
-        Args:
-            room_name: The LiveKit room name
-            logs_dir: Directory to store call logs (default: "call_logs")
-        """
         self.room_name = room_name
         self.start_time = datetime.now()
         self.logs_dir = logs_dir
-        
-        # Create logs directory if it doesn't exist
-        Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created logs directory: {self.logs_dir}")
-        
-        # Create the log file path
-        timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
-        self.log_file = os.path.join(
-            self.logs_dir,
-            f"{room_name}_{timestamp}.txt"
-        )
-        
-        logger.info(f"Call log file path: {self.log_file}")
-        
-        # Initialize log file with header
-        self._write_header()
-        logger.info(f"✅ Call logger initialized for room: {room_name}")
-    
-    def _write_header(self):
-        """Write header information to the log file."""
-        header = f"""{'='*80}
-📞 CALL LOG - {self.room_name}
-{'='*80}
-Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}
-Room Name: {self.room_name}
-{'='*80}
+        self._seq = 0  # monotonic sequence number across all events
 
-"""
+        Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
+
+        timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
+        self.log_file = os.path.join(self.logs_dir, f"{room_name}_{timestamp}.txt")
+
+        self._write_header()
+        logger.info("✅ CallLogger ready → %s", self.log_file)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Public logging methods
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def log_user_message(self, message: str):
+        """Log a caller utterance (output of STT)."""
+        self._write("👤 USER ", "STT    ", message)
+
+    def log_agent_message(self, message: str):
+        """Log an agent reply (input to TTS)."""
+        self._write("🤖 AGENT", "LLM    ", message)
+
+    def log_note(self, note: str):
+        """Log a note captured by the add_note tool."""
+        self._write("📝 NOTE ", "TOOL   ", note)
+
+    def log_system_event(self, event: str, stage: str = "LIFECYCLE"):
+        """Log a lifecycle or pipeline step event."""
+        self._write("⚙️  SYS  ", f"{stage:<7}", event)
+
+    def log_rag_event(self, event: str):
+        """Log a RAG-specific step (query, hit count, chars injected, etc.)."""
+        self._write("🔍 RAG  ", "RAG    ", event)
+
+    def log_error(self, error: str, stage: str = "ERROR"):
+        """Log an error — include stage name so you know where it broke."""
+        self._write("❌ ERR  ", f"{stage:<7}", error)
+        logger.error("[%s] %s", stage, error)
+
+    def log_call_summary(self, notes: list[str], duration_seconds: Optional[float] = None):
+        """Write the end-of-call summary block."""
+        end_time = datetime.now()
+        duration = duration_seconds or (end_time - self.start_time).total_seconds()
+        mins, secs = divmod(int(duration), 60)
+
+        lines = [
+            "",
+            "=" * 80,
+            "📊 CALL SUMMARY",
+            "=" * 80,
+            f"End Time : {end_time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Duration : {mins}m {secs}s",
+            f"Events   : {self._seq} total",
+            f"Notes    : {len(notes)}",
+            "",
+            "NOTES CAPTURED:",
+        ]
+        if notes:
+            for i, note in enumerate(notes, 1):
+                lines.append(f"  {i}. {note}")
+        else:
+            lines.append("  (none)")
+        lines.append("=" * 80)
+
+        self._append_to_file("\n".join(lines) + "\n")
+        logger.info("Call log saved → %s", self.log_file)
+
+    def get_log_file_path(self) -> str:
+        return self.log_file
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Internal helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _next_seq(self) -> int:
+        self._seq += 1
+        return self._seq
+
+    def _write(self, level: str, stage: str, message: str):
+        """Format and append one log line."""
+        ts = datetime.now().strftime("%H:%M:%S")
+        seq = self._next_seq()
+        line = f"[{ts}] #{seq:04d}  {level}  {stage}  {message}\n"
+        self._append_to_file(line)
+
+    def _write_header(self):
+        header = (
+            "=" * 80 + "\n"
+            f"📞 CALL LOG  —  {self.room_name}\n"
+            "=" * 80 + "\n"
+            f"Start Time : {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Room       : {self.room_name}\n"
+            "\n"
+            "COLUMNS: [time]  #seq  level  stage  message\n"
+            "STAGES : STT → RAG → LLM → TTS  |  TOOL  |  LIFECYCLE  |  ERROR\n"
+            "=" * 80 + "\n\n"
+        )
         self._append_to_file(header)
-    
+
     def _append_to_file(self, content: str):
-        """Append content to the log file."""
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(content)
-        except Exception as e:
-            logger.error(f"Failed to write to log file {self.log_file}: {e}")
-    
-    def log_user_message(self, message: str, timestamp: Optional[datetime] = None):
-        """Log a user message."""
-        ts = timestamp or datetime.now()
-        time_str = ts.strftime("%H:%M:%S")
-        entry = f"[{time_str}] 👤 USER: {message}\n"
-        self._append_to_file(entry)
-    
-    def log_agent_message(self, message: str, timestamp: Optional[datetime] = None):
-        """Log an agent message."""
-        ts = timestamp or datetime.now()
-        time_str = ts.strftime("%H:%M:%S")
-        entry = f"[{time_str}] 🤖 AGENT: {message}\n"
-        self._append_to_file(entry)
-    
-    def log_note(self, note: str, timestamp: Optional[datetime] = None):
-        """Log a saved note."""
-        ts = timestamp or datetime.now()
-        time_str = ts.strftime("%H:%M:%S")
-        entry = f"[{time_str}] 📝 NOTE: {note}\n"
-        self._append_to_file(entry)
-    
-    def log_system_event(self, event: str, timestamp: Optional[datetime] = None):
-        """Log a system event."""
-        ts = timestamp or datetime.now()
-        time_str = ts.strftime("%H:%M:%S")
-        entry = f"[{time_str}] ⚙️  SYSTEM: {event}\n"
-        self._append_to_file(entry)
-    
-    def log_error(self, error: str, timestamp: Optional[datetime] = None):
-        """Log an error."""
-        ts = timestamp or datetime.now()
-        time_str = ts.strftime("%H:%M:%S")
-        entry = f"[{time_str}] ❌ ERROR: {error}\n"
-        self._append_to_file(entry)
-    
-    def log_call_summary(self, notes: list[str], duration_seconds: Optional[float] = None):
-        """Log a call summary at the end of the call."""
-        end_time = datetime.now()
-        duration = duration_seconds or (end_time - self.start_time).total_seconds()
-        duration_str = self._format_duration(duration)
-        
-        summary = f"""
-{'='*80}
-📊 CALL SUMMARY
-{'='*80}
-End Time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
-Duration: {duration_str}
-Total Notes: {len(notes)}
-
-NOTES CAPTURED:
-"""
-        self._append_to_file(summary)
-        
-        if notes:
-            for i, note in enumerate(notes, 1):
-                self._append_to_file(f"  {i}. {note}\n")
-        else:
-            self._append_to_file("  (No notes captured)\n")
-        
-        footer = f"\n{'='*80}\n"
-        self._append_to_file(footer)
-        
-        logger.info(f"Call log saved to {self.log_file}")
-    
-    @staticmethod
-    def _format_duration(seconds: float) -> str:
-        """Format duration in seconds to a readable format."""
-        minutes = int(seconds) // 60
-        secs = int(seconds) % 60
-        return f"{minutes}m {secs}s"
-    
-    def get_log_file_path(self) -> str:
-        """Get the full path to the log file."""
-        return self.log_file
+        except Exception as exc:
+            logger.error("Failed to write log: %s", exc)

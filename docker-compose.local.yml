@@ -9,6 +9,7 @@
 services:
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -18,6 +19,7 @@ services:
 
   livekit:
     image: livekit/livekit-server:latest
+    restart: unless-stopped
     ports:
       - "7880:7880"
       - "7881:7881"
@@ -34,6 +36,7 @@ services:
 
   sip:
     image: livekit/sip:latest
+    restart: unless-stopped
     profiles:
       - sip
     # PORT MAPPING STRATEGY FOR WINDOWS DOCKER DESKTOP:
@@ -76,6 +79,7 @@ services:
   livekit_agent:
     build:
       context: ./livekit_agent
+    restart: unless-stopped
     env_file:
       - .env.local
     environment:
@@ -90,11 +94,23 @@ services:
       - STT_MODEL=${STT_MODEL:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
       - STT_API_KEY=${STT_API_KEY:-no-key-needed}
       # LLM + TTS — Groq cloud
-      - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - TTS_VOICE=${TTS_VOICE:-fahad}
       # Call Logs
       - CALL_LOGS=/app/call_logs
+      # RAG
+      - RAG_ENABLED=${RAG_ENABLED:-true}
+      - RAG_CHROMA_PATH=${RAG_CHROMA_PATH:-/app/rag/chroma}
+      - RAG_COLLECTION_NAME=${RAG_COLLECTION_NAME:-call_center_knowledge}
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-chroma}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-}
+      - RAG_EMBEDDING_API_KEY=${RAG_EMBEDDING_API_KEY:-}
+      - RAG_EMBEDDING_BASE_URL=${RAG_EMBEDDING_BASE_URL:-}
+      - RAG_EMBEDDING_DEVICE=${RAG_EMBEDDING_DEVICE:-}
+      - RAG_TOP_K=${RAG_TOP_K:-4}
+      - RAG_MAX_CONTEXT_CHARS=${RAG_MAX_CONTEXT_CHARS:-1800}
+      - RAG_KNOWLEDGE_DIR=${RAG_KNOWLEDGE_DIR:-/app/knowledge_base}
     volumes:
       - ${RAG_CHROMA_PATH_HOST:-./rag/chroma}:${RAG_CHROMA_PATH:-/app/rag/chroma}
       - ${RAG_KNOWLEDGE_DIR_HOST:-./livekit_agent/knowledge_base}:${RAG_KNOWLEDGE_DIR:-/app/knowledge_base}
@@ -115,6 +131,7 @@ services:
   frontend:
     build:
       context: ./frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:

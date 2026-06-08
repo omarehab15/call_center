@@ -231,9 +231,9 @@ if [ "${RAG_ENABLED:-true}" = "true" ]; then
   fi
 fi
 
-# ── FIX: Start detached so Ctrl+C doesn't kill containers or break terminal ──
+# ── Start detached — images already built above, no rebuild needed ───────────
 echo "Starting containers in detached mode (background)..."
-compose_cmd up --build -d "$@"
+compose_cmd up -d "$@"
 
 echo ""
 echo "========================================"

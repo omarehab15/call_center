@@ -7,9 +7,6 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
-    AudioConfig,
-    BackgroundAudioPlayer,
-    BuiltinAudioClip,
     ChatContext,
     ChatMessage,
     JobContext,
@@ -93,14 +90,19 @@ class Assistant(Agent):
             return
 
         try:
+            self.call_logger.log_system_event(f"RAG lookup started — query: {query[:120]}")
             rag_content = await self.rag_retriever.retrieve(query)
-        except Exception:
+        except Exception as exc:
+            msg = f"RAG lookup failed: {exc}"
             logger.exception("RAG lookup failed")
+            self.call_logger.log_error(msg)
             return
 
         rag_content = rag_content.strip()
         if not rag_content:
+            self.call_logger.log_system_event("RAG returned no results for this query")
             return
+        self.call_logger.log_system_event(f"RAG injected {len(rag_content)} chars into context")
 
         turn_ctx.add_message(
             role="assistant",
@@ -129,19 +131,7 @@ class Assistant(Agent):
         """
         logger.info("🟢 LLM CALLED add_note TOOL! Note: %s", note)
         self.notes.append(note)
-        
-        # Log note using CallLogger
         self.call_logger.log_note(note)
-        
-        debug_path = os.path.join(os.path.dirname(__file__), f"{self.call_id}_notes.txt")
-        try:
-            with open(debug_path, "w", encoding="utf-8") as f:
-                for n in self.notes:
-                    f.write(f'"{n}"\n')
-            logger.info("Saved call notes to %s", debug_path)
-        except Exception as e:
-            logger.error("Failed to save debug notes: %s", e)
-        
         notes_text = "\n".join(f"- {n}" for n in self.notes)
         new_instructions = f"{self.base_instructions}\n\nالملاحظات الحالية:\n{notes_text}"
         await self.update_instructions(new_instructions)
@@ -152,6 +142,8 @@ server = AgentServer()
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
+    # Load turn-detection model once at startup (not per call)
+    proc.userdata["turn_detector"] = MultilingualModel()
     try:
         proc.userdata["rag_retriever"] = build_rag_from_env()
     except Exception:
@@ -215,37 +207,24 @@ async def my_agent(ctx: JobContext):
             api_key=os.getenv("GROQ_API_KEY", ""),
         ),
         tts=tts_instance,
-        turn_detection=MultilingualModel(),
+        turn_detection=ctx.proc.userdata["turn_detector"],
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
 
     await ctx.connect()
 
-    # background_audio = BackgroundAudioPlayer(
-    #     ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8)
-    #     # thinking_sound=[
-    #     #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5),
-    #     #     AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
-    #     # ],
-    # )
-    
     assistant = Assistant(
         call_id=ctx.room.name,
         rag_retriever=ctx.proc.userdata.get("rag_retriever"),
     )
 
-    # Wrap session.generate_reply to log agent messages
-    original_generate_reply = session.generate_reply
-    
-    async def wrapped_generate_reply(*args, **kwargs):
-        result = await original_generate_reply(*args, **kwargs)
-        # Log the generated response
-        if result:
-            assistant.log_agent_message(str(result))
-        return result
-    
-    session.generate_reply = wrapped_generate_reply
+    @session.on("agent_message")
+    def on_agent_message(message: ChatMessage) -> None:
+        """Called whenever the agent produces a reply — gives us the real text."""
+        text = _message_text(message)
+        if text:
+            assistant.log_agent_message(text)
 
     try:
         await session.start(
@@ -255,8 +234,6 @@ async def my_agent(ctx: JobContext):
     finally:
         # Save call summary when call ends
         assistant.call_logger.log_call_summary(assistant.notes)
-    
-    # await background_audio.start(room=ctx.room, agent_session=session)
 
 def _message_text(message: Any) -> str:
     text_content = getattr(message, "text_content", "")
