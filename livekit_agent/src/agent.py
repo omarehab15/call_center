@@ -218,6 +218,8 @@ async def my_agent(ctx: JobContext):
                 language="ar",
                 # يوجه Whisper للهجة السعودية ويحسن الدقة
                 prompt="المحادثة باللهجة العربية السعودية",
+                # temperature=0 يمنع Whisper من اختراع كلام على صوت الـ telephone المضغوط
+                temperature=0,
             ),
             vad=ctx.proc.userdata["vad"],
         ),
