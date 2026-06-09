@@ -27,8 +27,8 @@ This lets you reconstruct the exact sequence of steps when something goes wrong.
 import logging
 import os
 from datetime import datetime
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger("call_logger")
 
@@ -41,11 +41,13 @@ class CallLogger:
         self.start_time = datetime.now()
         self.logs_dir = logs_dir
         self._seq = 0  # monotonic sequence number across all events
+        self._closed = False
 
         Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
 
-        timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
-        self.log_file = os.path.join(self.logs_dir, f"{room_name}_{timestamp}.txt")
+        timestamp = self.start_time.strftime("%Y%m%d_%H%M%S_%f")
+        safe_room_name = self._safe_filename(room_name)
+        self.log_file = os.path.join(self.logs_dir, f"{safe_room_name}_{timestamp}.txt")
 
         self._write_header()
         logger.info("✅ CallLogger ready → %s", self.log_file)
@@ -81,6 +83,8 @@ class CallLogger:
 
     def log_call_summary(self, notes: list[str], duration_seconds: Optional[float] = None):
         """Write the end-of-call summary block."""
+        if self._closed:
+            return
         end_time = datetime.now()
         duration = duration_seconds or (end_time - self.start_time).total_seconds()
         mins, secs = divmod(int(duration), 60)
@@ -105,6 +109,7 @@ class CallLogger:
         lines.append("=" * 80)
 
         self._append_to_file("\n".join(lines) + "\n")
+        self._closed = True
         logger.info("Call log saved → %s", self.log_file)
 
     def get_log_file_path(self) -> str:
@@ -120,6 +125,8 @@ class CallLogger:
 
     def _write(self, level: str, stage: str, message: str):
         """Format and append one log line."""
+        if self._closed:
+            return
         ts = datetime.now().strftime("%H:%M:%S")
         seq = self._next_seq()
         line = f"[{ts}] #{seq:04d}  {level}  {stage}  {message}\n"
@@ -145,3 +152,8 @@ class CallLogger:
                 f.write(content)
         except Exception as exc:
             logger.error("Failed to write log: %s", exc)
+
+    @staticmethod
+    def _safe_filename(value: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)
+        return safe.strip("_") or "call"

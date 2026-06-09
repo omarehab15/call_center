@@ -10,7 +10,7 @@
 #   docker compose -f docker-compose.local.yml logs -f
 #
 # To stop cleanly:
-#   docker compose -f docker-compose.local.yml --profile sip down
+#   ./stop-local.sh
 set -euo pipefail
 
 # Load .env.local to read STT endpoint and runtime config
@@ -70,7 +70,6 @@ fi
 
 COMPOSE_FILES=(-f docker-compose.local.yml)
 COMPOSE_ARGS=()
-RECREATE_SERVICES=()
 if [ "${SIP_ENABLED:-false}" = "true" ]; then
   COMPOSE_ARGS+=(--profile sip)
 fi
@@ -150,17 +149,6 @@ record_build_signatures() {
   done
 }
 
-remember_running_services_for_recreate() {
-  local service
-  local container_id
-  for service in "$@"; do
-    container_id="$(compose_cmd ps -a -q "$service" 2>/dev/null || true)"
-    if [ -n "$container_id" ]; then
-      RECREATE_SERVICES+=("$service")
-    fi
-  done
-}
-
 build_and_record_services() {
   local build_progress="$1"
   shift
@@ -170,7 +158,6 @@ build_and_record_services() {
     return 0
   fi
 
-  remember_running_services_for_recreate "${services[@]}"
   compose_cmd build --progress "$build_progress" "${services[@]}"
   record_build_signatures "${services[@]}"
 }
@@ -347,15 +334,11 @@ if [ "${RAG_ENABLED:-true}" = "true" ]; then
   fi
 fi
 
-# ── Start detached — unchanged containers are left alone ─────────────────────
-# --no-recreate starts missing containers without touching healthy existing ones.
-# Services with newly built images are recreated explicitly just below.
+# ── Start detached — no rebuild here; Compose recreates only changed services ─
+# This applies config changes (for example SIP media settings) without rebuilding
+# images that did not change.
 echo "Starting containers in detached mode (background)..."
-compose_cmd up -d --no-recreate "$@"
-if [ "${#RECREATE_SERVICES[@]}" -gt 0 ]; then
-  echo "Recreating services with updated images: ${RECREATE_SERVICES[*]}"
-  compose_cmd up -d --no-deps --force-recreate "${RECREATE_SERVICES[@]}"
-fi
+compose_cmd up -d "$@"
 
 echo ""
 echo "========================================"
@@ -363,5 +346,6 @@ echo "  Stack is running in the background"
 echo "========================================"
 echo ""
 echo "  Watch logs:   docker compose -f docker-compose.local.yml logs -f"
-echo "  Stop cleanly: docker compose -f docker-compose.local.yml$([ "${SIP_ENABLED:-false}" = "true" ] && echo " --profile sip") down"
+echo "  Stop only:    ./stop-local.sh"
+echo "  Delete stack: docker compose -f docker-compose.local.yml --profile sip --env-file .env.local down"
 echo ""

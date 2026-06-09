@@ -14,9 +14,10 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     function_tool,
+    room_io,
 )
 from livekit.agents import stt as stt_module
-from livekit.plugins import openai, silero
+from livekit.plugins import ai_coustics, noise_cancellation, openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from call_logger import CallLogger
@@ -232,6 +233,7 @@ async def my_agent(ctx: JobContext):
         call_id=ctx.room.name,
         rag_retriever=ctx.proc.userdata.get("rag_retriever"),
     )
+    session_room_options = _build_room_options()
 
     @session.on("conversation_item_added")
     def on_conversation_item_added(event: Any) -> None:
@@ -259,10 +261,13 @@ async def my_agent(ctx: JobContext):
     ctx.add_shutdown_callback(on_job_shutdown)
 
     try:
-        await session.start(
-            agent=assistant,
-            room=ctx.room,
-        )
+        start_kwargs = {
+            "agent": assistant,
+            "room": ctx.room,
+        }
+        if session_room_options is not None:
+            start_kwargs["room_options"] = session_room_options
+        await session.start(**start_kwargs)
     except Exception as exc:
         logger.exception("Agent session failed")
         assistant.call_logger.log_error(f"Agent session failed: {exc}")
@@ -277,6 +282,56 @@ def _message_text(message: Any) -> str:
     if isinstance(text_content, list):
         return "\n".join(str(part) for part in text_content if part).strip()
     return str(text_content or "").strip()
+
+
+def _build_room_options() -> Optional[room_io.RoomOptions]:
+    noise_filter = _build_noise_cancellation()
+    if noise_filter is None:
+        return None
+    return room_io.RoomOptions(
+        audio_input=room_io.AudioInputOptions(
+            noise_cancellation=noise_filter,
+        ),
+    )
+
+
+def _build_noise_cancellation() -> Any | None:
+    provider = os.getenv("AGENT_NOISE_CANCELLATION", "off").strip().lower()
+    if provider in {"", "off", "false", "0", "no", "none"}:
+        return None
+
+    if provider in {"ai_coustics", "ai-coustics", "quail", "quail_l"}:
+        logger.info("Agent noise cancellation enabled: ai_coustics QUAIL_L")
+        return ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_L)
+
+    if provider in {
+        "ai_coustics_voice_focus",
+        "ai-coustics-voice-focus",
+        "quail_vf_l",
+        "voice_focus",
+    }:
+        logger.info("Agent noise cancellation enabled: ai_coustics QUAIL_VF_L")
+        return ai_coustics.audio_enhancement(
+            model=ai_coustics.EnhancerModel.QUAIL_VF_L
+        )
+
+    if provider in {"krisp", "noise_cancellation", "noise-cancellation", "nc"}:
+        logger.info("Agent noise cancellation enabled: Krisp NC")
+        return noise_cancellation.NC()
+
+    if provider in {"bvc", "krisp_bvc", "background_voice"}:
+        logger.info("Agent noise cancellation enabled: Krisp BVC")
+        return noise_cancellation.BVC()
+
+    if provider in {"bvc_telephony", "krisp_bvc_telephony", "telephony"}:
+        logger.info("Agent noise cancellation enabled: Krisp BVCTelephony")
+        return noise_cancellation.BVCTelephony()
+
+    logger.warning(
+        "Unknown AGENT_NOISE_CANCELLATION=%r; noise cancellation disabled",
+        provider,
+    )
+    return None
 
 
 if __name__ == "__main__":

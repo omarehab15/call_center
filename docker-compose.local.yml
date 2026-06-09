@@ -63,8 +63,13 @@ services:
         redis:
           address: 'redis:6379'
         sip_port: 5060
+        sip_hostname: '${SIP_PUBLIC_HOST:-}'
         rtp_port: ${SIP_RTP_PORT_START:-10000}-${SIP_RTP_PORT_END:-10031}
         use_external_ip: ${SIP_USE_EXTERNAL_IP:-false}
+        media_use_external_ip: ${SIP_MEDIA_USE_EXTERNAL_IP:-true}
+        symmetric_rtp: ${SIP_SYMMETRIC_RTP:-true}
+        ignore_local_addr_in_sdp: ${SIP_IGNORE_LOCAL_ADDR_IN_SDP:-true}
+        enable_jitter_buffer: ${SIP_ENABLE_JITTER_BUFFER:-true}
         logging:
           level: ${SIP_LOG_LEVEL:-info}
     networks:
@@ -103,6 +108,8 @@ services:
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - TTS_VOICE=${TTS_VOICE:-fahad}
+      # Agent-side input noise cancellation: off, ai_coustics, quail_vf_l, nc, bvc, bvc_telephony
+      - AGENT_NOISE_CANCELLATION=${AGENT_NOISE_CANCELLATION:-off}
       # Call Logs
       - CALL_LOGS=/app/call_logs
       # RAG
