@@ -150,7 +150,10 @@ class Assistant(Agent):
 
 
 def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(
+        min_silence_duration=0.8,    # مياخدش يقطع وسط الجملة
+        prefix_padding_duration=0.3, # يمسك بداية الكلام صح
+    )
     # MultilingualModel requires a JobContext, so create it inside my_agent.
     # The Dockerfile pre-downloads its model files to keep runtime startup fast.
     try:
@@ -212,7 +215,9 @@ async def my_agent(ctx: JobContext):
                 base_url=stt_base_url,
                 model=stt_model,
                 api_key=stt_api_key,
-                language="ar"
+                language="ar",
+                # يوجه Whisper للهجة السعودية ويحسن الدقة
+                prompt="المحادثة باللهجة العربية السعودية",
             ),
             vad=ctx.proc.userdata["vad"],
         ),
@@ -285,6 +290,15 @@ def _message_text(message: Any) -> str:
 
 
 def _build_room_options() -> Optional[room_io.RoomOptions]:
+    # Noise cancellation via RoomOptions only works for WebRTC microphone input.
+    # For SIP calls, audio arrives as a remote RTP track from a SIP participant —
+    # applying noise cancellation at the room level breaks the audio pipeline
+    # (no TTS output, pipeline crash). Skip it entirely when SIP is enabled.
+    is_sip = os.getenv("SIP_ENABLED", "false").strip().lower() in {"true", "1", "yes", "on"}
+    if is_sip:
+        logger.info("SIP mode detected: skipping RoomOptions noise cancellation")
+        return None
+
     noise_filter = _build_noise_cancellation()
     if noise_filter is None:
         return None
