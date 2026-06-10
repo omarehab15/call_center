@@ -108,8 +108,16 @@ services:
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - TTS_VOICE=${TTS_VOICE:-fahad}
-      # Agent-side input noise cancellation: off, ai_coustics, quail_vf_l, nc, bvc, bvc_telephony
-      - AGENT_NOISE_CANCELLATION=${AGENT_NOISE_CANCELLATION:-off}
+      # SIP mode — enables BVCTelephony noise cancellation automatically
+      - SIP_ENABLED=${SIP_ENABLED:-false}
+      # Agent-side input noise cancellation: off, quail_vf_l, ai_coustics, nc, bvc, bvc_telephony
+      # Default changed to quail_vf_l (best for WebRTC + diverse environments)
+      - AGENT_NOISE_CANCELLATION=${AGENT_NOISE_CANCELLATION:-quail_vf_l}
+      # Loudness normalization (EBU R128) — normalizes caller audio before STT
+      - LOUDNORM_ENABLED=${LOUDNORM_ENABLED:-true}
+      - LOUDNORM_TARGET_LUFS=${LOUDNORM_TARGET_LUFS:--18}
+      - LOUDNORM_MAX_GAIN_DB=${LOUDNORM_MAX_GAIN_DB:-15}
+      - LOUDNORM_BUFFER_FRAMES=${LOUDNORM_BUFFER_FRAMES:-40}
       # Call Logs
       - CALL_LOGS=/app/call_logs
       # RAG
@@ -143,9 +151,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1200M
+          memory: 1400M
         reservations:
-          memory: 512M
+          memory: 600M
 
   frontend:
     build:

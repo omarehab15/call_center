@@ -302,9 +302,12 @@ echo "  • LiveKit       → ws://localhost:7880"
 echo "  • Agent         → connecting to remote STT + Groq LLM/TTS"
 if [ "${SIP_ENABLED:-false}" = "true" ] || [ "${SIP_TEST_PROFILE:-}" = "vast" ]; then
   echo "  • SIP signaling → ${SIP_PUBLIC_HOST:-<set SIP_PUBLIC_HOST>}:${SIP_SIGNALING_PORT:-5060}"
+  echo "  • Noise cancel  → BVCTelephony (telephony mode)"
 else
   echo "  • SIP           → disabled (set SIP_ENABLED=true to enable)"
+  echo "  • Noise cancel  → ${AGENT_NOISE_CANCELLATION:-quail_vf_l} (WebRTC mode)"
 fi
+echo "  • Loudnorm      → ${LOUDNORM_ENABLED:-true} (target: ${LOUDNORM_TARGET_LUFS:--18} LUFS)"
 if [ "${RAG_ENABLED:-true}" = "true" ]; then
   echo "  • RAG           → enabled (ingest mode: ${RAG_INGEST_MODE:-changed})"
 else
