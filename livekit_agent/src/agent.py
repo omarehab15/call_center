@@ -21,7 +21,7 @@ from livekit.agents import (
     function_tool,
     room_io,
 )
-from livekit.agents import audio as lk_audio
+from livekit import rtc as lk_audio
 from livekit.agents import stt as stt_module
 from livekit.plugins import ai_coustics, noise_cancellation, openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
@@ -464,16 +464,29 @@ async def my_agent(ctx: JobContext) -> None:
     session_room_options = _build_room_options()
 
     # ── Loudness normalization ────────────────────────────────────────────────
-    # Wraps the session's audio input stream so every caller's audio is
-    # normalized to TARGET_LUFS before it reaches VAD + STT.
-    # Only active when LOUDNORM_ENABLED=true (default: true).
+    # Attached AFTER ctx.connect() so session.input.audio is guaranteed
+    # to be non-None before we try to wrap it.
+    # We poll briefly (max 10 × 50 ms = 500 ms) in case the audio track
+    # arrives slightly after the room connection is established.
     if os.getenv("LOUDNORM_ENABLED", "true").strip().lower() in {"true", "1", "yes", "on"}:
-        _attach_loudness_normalizer(session)
-        assistant.call_logger.log_system_event(
-            f"Loudness normalization enabled "
-            f"(target={LoudnessNormalizer.TARGET_LUFS} LUFS, "
-            f"max_gain={LoudnessNormalizer.MAX_GAIN_DB} dB)"
-        )
+        _loudnorm_attached = False
+        for _attempt in range(10):
+            if getattr(session.input, "audio", None) is not None:
+                _attach_loudness_normalizer(session)
+                _loudnorm_attached = True
+                break
+            await asyncio.sleep(0.05)
+
+        if _loudnorm_attached:
+            assistant.call_logger.log_system_event(
+                f"Loudness normalization enabled "
+                f"(target={LoudnessNormalizer.TARGET_LUFS} LUFS, "
+                f"max_gain={LoudnessNormalizer.MAX_GAIN_DB} dB)"
+            )
+        else:
+            assistant.call_logger.log_system_event(
+                "Loudness normalization skipped — audio input not ready after 500 ms"
+            )
     else:
         assistant.call_logger.log_system_event("Loudness normalization disabled")
 
@@ -546,9 +559,19 @@ def _attach_loudness_normalizer(session: AgentSession) -> None:
     LiveKit AgentSession exposes the audio input stream via
     ``session.input.audio``.  We wrap ``__aiter__`` so the normalizer
     is transparent to all downstream consumers.
+
+    Must be called AFTER ctx.connect() — session.input.audio is None
+    until the room connection is established and the audio track arrives.
     """
     try:
         audio_input = session.input.audio
+        # Guard against None: audio track not yet subscribed
+        if audio_input is None:
+            logger.warning(
+                "LoudnessNormalizer: session.input.audio is None — "
+                "normalization skipped (call after ctx.connect())"
+            )
+            return
     except AttributeError:
         logger.warning(
             "LoudnessNormalizer: session.input.audio not available — "

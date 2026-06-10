@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 
-# Use the official UV Python base image with Python 3.13 on Debian Bookworm
+# Use Python slim base + uv from Docker Hub (avoids ghcr.io DNS issues)
 ARG PYTHON_VERSION=3.13
-FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS base
+FROM python:${PYTHON_VERSION}-slim-bookworm AS base
+
+# Copy uv binary from Docker Hub (no ghcr.io needed)
+COPY --from=docker.io/astral/uv:latest /uv /usr/local/bin/uv
 
 # Keeps Python from buffering stdout and stderr
 ENV PYTHONUNBUFFERED=1
@@ -17,13 +20,13 @@ RUN adduser \
     --uid "${UID}" \
     appuser
 
-# Install build deps + curl (needed for the healthcheck)
-# FIX: added curl so the docker-compose healthcheck doesn't fail
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
+# Install runtime deps only — gcc/g++/python3-dev removed intentionally.
+# chromadb, grpcio, and all other packages have pre-built wheels for
+# Python 3.13 / linux/amd64, so no compilation is needed.
+# libglib2.0-0 is a shared-library runtime dep for some wheels.
+# curl is needed for the docker-compose healthcheck.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
-    python3-dev \
     curl \
   && rm -rf /var/lib/apt/lists/*
 
