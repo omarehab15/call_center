@@ -111,8 +111,9 @@ services:
       # SIP mode — enables BVCTelephony noise cancellation automatically
       - SIP_ENABLED=${SIP_ENABLED:-false}
       # Agent-side input noise cancellation: off, quail_vf_l, ai_coustics, nc, bvc, bvc_telephony
-      # Default changed to quail_vf_l (best for WebRTC + diverse environments)
-      - AGENT_NOISE_CANCELLATION=${AGENT_NOISE_CANCELLATION:-quail_vf_l}
+      # Default is off for local setup — quail_vf_l and ai_coustics require LiveKit Cloud.
+      # Set AGENT_NOISE_CANCELLATION=bvc_telephony in .env.local for SIP, or nc/bvc for WebRTC.
+      - AGENT_NOISE_CANCELLATION=${AGENT_NOISE_CANCELLATION:-off}
       # Loudness normalization (EBU R128) — normalizes caller audio before STT
       - LOUDNORM_ENABLED=${LOUDNORM_ENABLED:-true}
       - LOUDNORM_TARGET_LUFS=${LOUDNORM_TARGET_LUFS:--18}
@@ -120,10 +121,16 @@ services:
       - LOUDNORM_BUFFER_FRAMES=${LOUDNORM_BUFFER_FRAMES:-40}
       # Call Logs
       - CALL_LOGS=/app/call_logs
+      # Local call recordings (stereo OGG: left=caller, right=agent)
+      - CALL_RECORDING_ENABLED=${CALL_RECORDING_ENABLED:-true}
+      - CALL_RECORDINGS_DIR=/app/call_recordings
       # RAG
       - RAG_ENABLED=${RAG_ENABLED:-true}
       - RAG_CHROMA_PATH=${RAG_CHROMA_PATH:-/app/rag/chroma}
-      - RAG_COLLECTION_NAME=${RAG_COLLECTION_NAME:-call_center_knowledge}
+      # FIX: use call_center_knowledge_chroma to match rag.py _default_collection_name()
+      # which appends _chroma when RAG_EMBEDDING_PROVIDER=chroma (the default).
+      # If you change RAG_EMBEDDING_PROVIDER, update this name accordingly.
+      - RAG_COLLECTION_NAME=${RAG_COLLECTION_NAME:-call_center_knowledge_chroma}
       - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-chroma}
       - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-}
       - RAG_EMBEDDING_API_KEY=${RAG_EMBEDDING_API_KEY:-}
@@ -136,6 +143,7 @@ services:
       - ${RAG_CHROMA_PATH_HOST:-./rag/chroma}:${RAG_CHROMA_PATH:-/app/rag/chroma}
       - ${RAG_KNOWLEDGE_DIR_HOST:-./livekit_agent/knowledge_base}:${RAG_KNOWLEDGE_DIR:-/app/knowledge_base}
       - ${CALL_LOGS_HOST:-./livekit_agent/call_logs}:${CALL_LOGS:-/app/call_logs}
+      - ${CALL_RECORDINGS_HOST:-./call_recordings}:/app/call_recordings
     depends_on:
       livekit:
         condition: service_started

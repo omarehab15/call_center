@@ -7,7 +7,6 @@ from typing import Any, Optional
 import numpy as np
 import pyloudnorm as pyln
 from dotenv import load_dotenv
-from livekit import api as lkapi_module
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -23,6 +22,7 @@ from livekit.agents import (
 )
 from livekit import rtc as lk_audio
 from livekit.agents import stt as stt_module
+from livekit.agents.voice.recorder_io import RecorderIO
 from livekit.plugins import ai_coustics, noise_cancellation, openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -134,98 +134,164 @@ class LoudnessNormalizer:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Egress helpers
+# Local call recorder
 # ══════════════════════════════════════════════════════════════════════════════
 
-async def start_call_recording(room_name: str) -> Optional[str]:
+# ══════════════════════════════════════════════════════════════════════════════
+# Local call recorder
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LocalCallRecorder:
     """
-    Start a RoomCompositeEgress (audio-only) for the given room.
+    Records every call to a local .ogg file (Opus stereo) using the
+    built-in livekit-agents RecorderIO.
 
-    Audio is saved as an .mp3 file to S3.  The path inside the bucket is:
-        recordings/<room_name>.mp3
+    Output format — stereo Opus in an OGG container:
+        Left  channel → caller audio  (session.input.audio)
+        Right channel → agent audio   (session.output.audio / TTS)
 
-    Required env vars:
-        LIVEKIT_URL          — e.g. https://myproject.livekit.cloud
-        LIVEKIT_API_KEY
-        LIVEKIT_API_SECRET
-        S3_RECORDING_BUCKET  — target S3 bucket name
-        S3_RECORDING_REGION  — AWS region  (default: us-east-1)
-        S3_ACCESS_KEY        — AWS access key id
-        S3_SECRET_KEY        — AWS secret access key
+    File location:
+        <CALL_RECORDINGS_DIR>/<room_name>_<timestamp>.ogg
 
-    Optional:
-        S3_ENDPOINT          — custom endpoint for S3-compatible stores (MinIO, etc.)
+    The directory is configured via the CALL_RECORDINGS_DIR env var
+    (default: /app/call_recordings).
 
-    Returns the egress_id on success, or None if recording is disabled /
-    configuration is missing.
+    ── How it avoids the race condition ──────────────────────────────────────
+    session.start() calls RoomIO.start() which sets session.output.audio
+    synchronously, then immediately fires _on_audio_output_changed().
+    session.start() then returns and spawns on_enter() as a background task.
+
+    If we wrap output.audio AFTER session.start() returns, there is a race:
+    on_enter() may grab a reference to the old (unwrapped) output.audio before
+    our wrap runs, so TTS frames never pass through RecorderAudioOutput.
+
+    The fix: we patch session._on_audio_output_changed BEFORE session.start().
+    When RoomIO sets session.output.audio, our hook fires synchronously
+    (no await) in the same call stack, wraps the stream with RecorderIO,
+    and starts the file writer — all before the event loop has a chance to
+    run on_enter().  This guarantees every TTS frame is captured.
+
+    The input side (caller audio) is handled the same way via
+    _on_audio_input_changed.
     """
-    bucket     = os.getenv("S3_RECORDING_BUCKET", "").strip()
-    access_key = os.getenv("S3_ACCESS_KEY", "").strip()
-    secret_key = os.getenv("S3_SECRET_KEY", "").strip()
 
-    if not all([bucket, access_key, secret_key]):
-        logger.info(
-            "Recording disabled: S3_RECORDING_BUCKET / S3_ACCESS_KEY / "
-            "S3_SECRET_KEY not set."
+    def __init__(self, session: AgentSession, room_name: str) -> None:
+        self._session    = session
+        self._room_name  = room_name
+        self._recorder: Optional[RecorderIO]  = None
+        self._output_path: Optional[str]      = None
+        self._enabled                         = (
+            os.getenv("CALL_RECORDING_ENABLED", "true").strip().lower()
+            in {"true", "1", "yes", "on"}
         )
-        return None
+        self._installed  = False   # guard: install hooks only once
 
-    region   = os.getenv("S3_RECORDING_REGION", "us-east-1").strip()
-    endpoint = os.getenv("S3_ENDPOINT", "").strip()  # leave empty for AWS
+    # ------------------------------------------------------------------
+    def install(self) -> None:
+        """
+        Patch session._on_audio_input_changed and _on_audio_output_changed
+        BEFORE session.start() is called.
 
-    s3_upload = lkapi_module.S3Upload(
-        bucket=bucket,
-        region=region,
-        access_key=access_key,
-        secret=secret_key,
-        **({"endpoint": endpoint} if endpoint else {}),
-    )
+        When RoomIO wires up input.audio / output.audio during session.start(),
+        both callbacks fire synchronously.  We use them to wrap the streams
+        with RecorderIO at exactly the right moment — before on_enter() can
+        grab a stale reference.
+        """
+        if not self._enabled or self._installed:
+            return
 
-    file_output = lkapi_module.EncodedFileOutput(
-        file_type=lkapi_module.EncodedFileType.MP3,
-        filepath=f"recordings/{room_name}.mp3",
-        s3=s3_upload,
-    )
+        self._installed = True
+        _orig_in  = self._session._on_audio_input_changed
+        _orig_out = self._session._on_audio_output_changed
 
-    req = lkapi_module.RoomCompositeEgressRequest(
-        room_name=room_name,
-        audio_only=True,
-        # Opus 96 kbps — good quality for voice; tiny file size
-        preset=lkapi_module.EncodingOptionsPreset.OPUS_96,
-        file_outputs=[file_output],
-    )
+        def _on_audio_input_changed() -> None:
+            _orig_in()
+            self._try_attach()
 
-    try:
-        lk = lkapi_module.LiveKitAPI(
-            url=os.getenv("LIVEKIT_URL", ""),
-            api_key=os.getenv("LIVEKIT_API_KEY", ""),
-            api_secret=os.getenv("LIVEKIT_API_SECRET", ""),
+        def _on_audio_output_changed() -> None:
+            _orig_out()
+            self._try_attach()
+
+        # Patch directly — AgentSession stores these as bound methods via
+        # AgentInput/AgentOutput callbacks, so we need to update the
+        # underlying _audio_changed references on the io containers.
+        self._session._input._audio_changed  = _on_audio_input_changed   # type: ignore[attr-defined]
+        self._session._output._audio_changed = _on_audio_output_changed  # type: ignore[attr-defined]
+        logger.debug("LocalCallRecorder: hooks installed")
+
+    def _try_attach(self) -> None:
+        """Called synchronously when either audio stream is set. Attaches RecorderIO
+        as soon as BOTH input and output are non-None."""
+        if self._recorder is not None:
+            return  # already attached
+
+        audio_input  = getattr(self._session.input,  "audio", None)
+        audio_output = getattr(self._session.output, "audio", None)
+
+        if audio_input is None or audio_output is None:
+            return  # wait until both are ready
+
+        recordings_dir = os.getenv(
+            "CALL_RECORDINGS_DIR",
+            os.path.join(os.path.dirname(__file__), "..", "call_recordings"),
         )
-        info      = await lk.egress.start_room_composite_egress(req)
-        egress_id = info.egress_id
-        logger.info("Recording started: egress_id=%s  file=recordings/%s.mp3", egress_id, room_name)
-        return egress_id
-    except Exception:
-        logger.exception("Failed to start call recording")
-        return None
+        os.makedirs(recordings_dir, exist_ok=True)
 
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = "".join(
+            ch if ch.isalnum() or ch in ("-", "_") else "_"
+            for ch in self._room_name
+        ).strip("_") or "call"
+        self._output_path = os.path.join(recordings_dir, f"{safe_name}_{timestamp}.ogg")
 
-async def stop_call_recording(egress_id: str) -> None:
-    """Stop a running egress by its ID."""
-    if not egress_id:
-        return
-    try:
-        lk = lkapi_module.LiveKitAPI(
-            url=os.getenv("LIVEKIT_URL", ""),
-            api_key=os.getenv("LIVEKIT_API_KEY", ""),
-            api_secret=os.getenv("LIVEKIT_API_SECRET", ""),
-        )
-        await lk.egress.stop_egress(
-            lkapi_module.StopEgressRequest(egress_id=egress_id)
-        )
-        logger.info("Recording stopped: egress_id=%s", egress_id)
-    except Exception:
-        logger.exception("Failed to stop call recording (egress_id=%s)", egress_id)
+        try:
+            self._recorder = RecorderIO(agent_session=self._session)
+
+            # Wrap both streams synchronously — no await needed here.
+            # RecorderAudioInput wraps __anext__ transparently.
+            # RecorderAudioOutput wraps capture_frame/flush and listens to
+            # playback_finished events from _ParticipantAudioOutput to flush
+            # each segment to disk.
+            self._session.input.audio  = self._recorder.record_input(audio_input)
+            self._session.output.audio = self._recorder.record_output(audio_output)
+
+            # Start the file writer (needs an event loop — schedule as a task).
+            asyncio.ensure_future(self._start_writer())
+            logger.info("LocalCallRecorder: streams wrapped → %s", self._output_path)
+
+        except Exception:
+            logger.exception("LocalCallRecorder: failed to attach")
+            self._recorder     = None
+            self._output_path  = None
+
+    async def _start_writer(self) -> None:
+        """Start the background encoder thread that writes frames to disk."""
+        if self._recorder is None or self._output_path is None:
+            return
+        try:
+            await self._recorder.start(output_path=self._output_path)
+            logger.info("📹 Local recording started → %s  (L=caller  R=agent)", self._output_path)
+        except Exception:
+            logger.exception("LocalCallRecorder: failed to start writer")
+
+    async def stop(self) -> None:
+        """Flush and finalise the .ogg file."""
+        if self._recorder is None:
+            return
+        try:
+            await self._recorder.aclose()
+            logger.info("📹 Local recording saved  → %s", self._output_path)
+        except Exception:
+            logger.exception(
+                "LocalCallRecorder: error while stopping (path=%s)", self._output_path
+            )
+        finally:
+            self._recorder = None
+
+    @property
+    def output_path(self) -> Optional[str]:
+        return self._output_path
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -443,23 +509,11 @@ async def my_agent(ctx: JobContext) -> None:
 
     await ctx.connect()
 
-    # ── Start audio recording ─────────────────────────────────────────────────
-    egress_id: Optional[str] = await start_call_recording(ctx.room.name)
-
     # ── Build assistant ───────────────────────────────────────────────────────
     assistant = Assistant(
         call_id=ctx.room.name,
         rag_retriever=ctx.proc.userdata.get("rag_retriever"),
     )
-
-    if egress_id:
-        assistant.call_logger.log_system_event(
-            f"Audio recording started (egress_id={egress_id})"
-        )
-    else:
-        assistant.call_logger.log_system_event(
-            "Audio recording disabled (S3 credentials not configured)"
-        )
 
     session_room_options = _build_room_options()
 
@@ -490,6 +544,15 @@ async def my_agent(ctx: JobContext) -> None:
     else:
         assistant.call_logger.log_system_event("Loudness normalization disabled")
 
+    # ── Local recorder ────────────────────────────────────────────────────────
+    # install() patches session._on_audio_input_changed and
+    # _on_audio_output_changed BEFORE session.start().  When RoomIO wires up
+    # input.audio / output.audio inside session.start(), our hooks fire
+    # synchronously and wrap the streams with RecorderIO immediately —
+    # before on_enter() has a chance to grab a stale reference.
+    recorder = LocalCallRecorder(session, ctx.room.name)
+    recorder.install()
+
     # ── Event handlers ────────────────────────────────────────────────────────
     @session.on("conversation_item_added")
     def on_conversation_item_added(event: Any) -> None:
@@ -507,15 +570,12 @@ async def my_agent(ctx: JobContext) -> None:
         assistant.call_logger.log_system_event(f"Session closed: {reason}")
         if error:
             assistant.call_logger.log_error(f"Session closed with error: {error}")
-        # Stop the audio recording then finalize the text log
-        if egress_id:
-            asyncio.ensure_future(stop_call_recording(egress_id))
+        asyncio.ensure_future(recorder.stop())
         assistant.finalize_call()
 
     async def on_job_shutdown(reason: str) -> None:
         assistant.call_logger.log_system_event(f"Job shutdown: {reason}")
-        if egress_id:
-            await stop_call_recording(egress_id)
+        await recorder.stop()
         assistant.finalize_call()
 
     ctx.add_shutdown_callback(on_job_shutdown)
@@ -529,11 +589,11 @@ async def my_agent(ctx: JobContext) -> None:
         if session_room_options is not None:
             start_kwargs["room_options"] = session_room_options
         await session.start(**start_kwargs)
+
     except Exception as exc:
         logger.exception("Agent session failed")
         assistant.call_logger.log_error(f"Agent session failed: {exc}")
-        if egress_id:
-            await stop_call_recording(egress_id)
+        await recorder.stop()
         assistant.finalize_call()
         raise
 
