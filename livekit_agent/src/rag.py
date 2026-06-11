@@ -38,6 +38,13 @@ class RagConfig:
     embedding_model: str
     top_k: int
     max_context_chars: int
+    # Cosine distance threshold — chunks with distance > this value are
+    # considered irrelevant and discarded before injecting into context.
+    # Cosine distance range: 0.0 (identical) → 2.0 (opposite).
+    # 0.45 works well for Arabic call-centre queries with all-MiniLM-L6-v2.
+    # Raise to 0.55 if you find too many relevant results being dropped;
+    # lower to 0.35 for stricter relevance filtering.
+    distance_threshold: float = 0.45
     device: Optional[str] = None
     embedding_api_key: Optional[str] = None
     embedding_base_url: Optional[str] = None
@@ -55,8 +62,13 @@ class RagConfig:
             or _default_collection_name(provider),
             embedding_provider=provider,
             embedding_model=_embedding_model_from_env(provider),
-            top_k=max(1, _env_int("RAG_TOP_K", 4)),
-            max_context_chars=max(300, _env_int("RAG_MAX_CONTEXT_CHARS", 1800)),
+            # Reduced from 4 → 2: fewer chunks = less context = faster LLM
+            top_k=max(1, _env_int("RAG_TOP_K", 2)),
+            # Reduced from 1800 → 800: keeps context tight for voice responses
+            max_context_chars=max(300, _env_int("RAG_MAX_CONTEXT_CHARS", 800)),
+            distance_threshold=float(
+                os.getenv("RAG_DISTANCE_THRESHOLD", "0.45")
+            ),
             device=os.getenv("RAG_EMBEDDING_DEVICE") or None,
             embedding_api_key=os.getenv("RAG_EMBEDDING_API_KEY")
             or os.getenv("OPENAI_API_KEY"),
@@ -172,21 +184,55 @@ class ChromaRagRetriever:
             n_results=self._config.top_k,
             include=["documents", "metadatas", "distances"],
         )
-        # Log hit summary for debugging
-        docs = _first_result_list(results.get("documents"))
+        docs      = _first_result_list(results.get("documents"))
         distances = _first_result_list(results.get("distances"))
-        hits = len([d for d in docs if d and str(d).strip()])
+        threshold = self._config.distance_threshold
+
+        # ── Distance threshold filtering ──────────────────────────────────
+        # Discard chunks that are too far from the query in vector space.
+        # This prevents injecting irrelevant context into the LLM when the
+        # query is a greeting, acknowledgement, or off-topic utterance.
+        filtered_docs      = []
+        filtered_distances = []
+        filtered_metas     = []
+        metadatas          = _first_result_list(results.get("metadatas"))
+
+        for i, (doc, dist) in enumerate(zip(docs, distances)):
+            if not doc or not str(doc).strip():
+                continue
+            if isinstance(dist, float) and dist > threshold:
+                logger.debug(
+                    "RAG chunk #%d filtered out — distance=%.3f > threshold=%.3f",
+                    i, dist, threshold,
+                )
+                continue
+            filtered_docs.append(doc)
+            filtered_distances.append(dist)
+            filtered_metas.append(metadatas[i] if i < len(metadatas) else {})
+
+        hits = len(filtered_docs)
+        total = len([d for d in docs if d and str(d).strip()])
         if hits:
             dist_str = ", ".join(
-                f"{d:.3f}" for d in distances[:hits] if isinstance(d, float)
+                f"{d:.3f}" for d in filtered_distances if isinstance(d, float)
             )
             logger.debug(
-                "RAG hits=%d/%d distances=[%s] query=%r",
-                hits, self._config.top_k, dist_str, query[:80],
+                "RAG hits=%d/%d (filtered %d by threshold=%.2f) distances=[%s] query=%r",
+                hits, self._config.top_k, total - hits, threshold, dist_str, query[:80],
             )
         else:
-            logger.debug("RAG no hits for query=%r", query[:80])
-        return format_rag_results(results, max_chars=self._config.max_context_chars)
+            logger.debug(
+                "RAG no relevant hits (all %d chunks exceeded threshold=%.2f) query=%r",
+                total, threshold, query[:80],
+            )
+            return ""
+
+        filtered_results = {
+            "documents": [filtered_docs],
+            "metadatas":  [filtered_metas],
+            "distances":  [filtered_distances],
+        }
+        return format_rag_results(filtered_results, max_chars=self._config.max_context_chars)
 
 
 def build_rag_from_env() -> Optional[RagRetriever]:

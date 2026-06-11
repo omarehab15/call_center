@@ -136,8 +136,11 @@ services:
       - RAG_EMBEDDING_API_KEY=${RAG_EMBEDDING_API_KEY:-}
       - RAG_EMBEDDING_BASE_URL=${RAG_EMBEDDING_BASE_URL:-}
       - RAG_EMBEDDING_DEVICE=${RAG_EMBEDDING_DEVICE:-}
-      - RAG_TOP_K=${RAG_TOP_K:-4}
-      - RAG_MAX_CONTEXT_CHARS=${RAG_MAX_CONTEXT_CHARS:-1800}
+      - RAG_TOP_K=${RAG_TOP_K:-2}
+      - RAG_MAX_CONTEXT_CHARS=${RAG_MAX_CONTEXT_CHARS:-800}
+      # Distance threshold: chunks with cosine distance > this are discarded (حل 3)
+      # Range: 0.0 (identical) → 2.0 (opposite). Raise to 0.55 if too strict.
+      - RAG_DISTANCE_THRESHOLD=${RAG_DISTANCE_THRESHOLD:-0.45}
       - RAG_KNOWLEDGE_DIR=${RAG_KNOWLEDGE_DIR:-/app/knowledge_base}
     volumes:
       - ${RAG_CHROMA_PATH_HOST:-./rag/chroma}:${RAG_CHROMA_PATH:-/app/rag/chroma}
