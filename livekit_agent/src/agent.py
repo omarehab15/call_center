@@ -376,7 +376,12 @@ class Assistant(Agent):
         self._last_query = query
         try:
             self.call_logger.log_system_event(f"RAG lookup started — query: {query[:120]}")
-            rag_content = await self.rag_retriever.retrieve(query)
+            # retrieve_with_chunks بيرجع الـ context + list من الـ chunks للـ log
+            if hasattr(self.rag_retriever, "retrieve_with_chunks"):
+                rag_content, rag_chunks = await self.rag_retriever.retrieve_with_chunks(query)
+            else:
+                rag_content = await self.rag_retriever.retrieve(query)
+                rag_chunks = []
         except Exception as exc:
             msg = f"RAG lookup failed: {exc}"
             logger.exception("RAG lookup failed")
@@ -387,6 +392,18 @@ class Assistant(Agent):
         if not rag_content:
             self.call_logger.log_system_event("RAG returned no results for this query")
             return
+
+        # ── لوّج كل chunk بشكل واضح في الـ call log ──────────────────────────
+        self.call_logger.log_rag_event(
+            f"retrieved {len(rag_chunks)} chunks | total {len(rag_content)} chars"
+        )
+        for i, chunk in enumerate(rag_chunks, 1):
+            preview = chunk.text[:120].replace("\n", " ")
+            self.call_logger.log_rag_event(
+                f"chunk {i}/{len(rag_chunks)} | distance={chunk.distance:.3f} | "
+                f"source={chunk.source} | chunk_idx={chunk.chunk_index}\n"
+                f"    └─ {preview}{'...' if len(chunk.text) > 120 else ''}"
+            )
 
         self.call_logger.log_system_event(f"RAG injected {len(rag_content)} chars into context")
         turn_ctx.add_message(

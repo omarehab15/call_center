@@ -166,27 +166,50 @@ class ChromaRagRetriever:
             return ""
         return await asyncio.to_thread(self._retrieve_sync, query)
 
+    async def retrieve_with_chunks(self, query: str) -> tuple[str, list[RagChunk]]:
+        """مثل retrieve() بس بيرجع كمان list من RagChunk للـ call log."""
+        query = query.strip()
+        if not query:
+            return "", []
+        return await asyncio.to_thread(self._retrieve_sync_with_chunks, query)
+
     def _retrieve_sync(self, query: str) -> str:
+        context, _ = self._retrieve_sync_with_chunks(query)
+        return context
+
+    def _retrieve_sync_with_chunks(self, query: str) -> tuple[str, list[RagChunk]]:
         results = self._collection.query(
             query_texts=[query],
             n_results=self._config.top_k,
             include=["documents", "metadatas", "distances"],
         )
-        # Log hit summary for debugging
-        docs = _first_result_list(results.get("documents"))
+        docs      = _first_result_list(results.get("documents"))
+        metadatas = _first_result_list(results.get("metadatas"))
         distances = _first_result_list(results.get("distances"))
-        hits = len([d for d in docs if d and str(d).strip()])
+
+        chunks: list[RagChunk] = []
+        for i, doc in enumerate(docs):
+            doc = str(doc).strip() if doc else ""
+            if not doc:
+                continue
+            meta     = metadatas[i] if i < len(metadatas) else {}
+            dist     = distances[i] if i < len(distances) else 1.0
+            source   = meta.get("source", "unknown") if isinstance(meta, dict) else "unknown"
+            chunk_idx = int(meta.get("chunk", i)) if isinstance(meta, dict) else i
+            chunks.append(RagChunk(text=doc, source=source, distance=float(dist), chunk_index=chunk_idx))
+
+        hits = len(chunks)
         if hits:
-            dist_str = ", ".join(
-                f"{d:.3f}" for d in distances[:hits] if isinstance(d, float)
-            )
+            dist_str = ", ".join(f"{c.distance:.3f}" for c in chunks)
             logger.debug(
                 "RAG hits=%d/%d distances=[%s] query=%r",
                 hits, self._config.top_k, dist_str, query[:80],
             )
         else:
             logger.debug("RAG no hits for query=%r", query[:80])
-        return format_rag_results(results, max_chars=self._config.max_context_chars)
+
+        context = format_rag_results(results, max_chars=self._config.max_context_chars)
+        return context, chunks
 
 
 def build_rag_from_env() -> Optional[RagRetriever]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -14,7 +15,7 @@ _client = AsyncOpenAI(
 
 _CLASSIFIER_MODEL = os.getenv("INTENT_CLASSIFIER_MODEL", "llama-3.1-8b-instant")
 
-# ─── Prompt مبني مباشرة على الـ KB ────────────────────────────────────────────
+# ─── Prompt ───────────────────────────────────────────────────────────────────
 _CLASSIFIER_SYSTEM = """أنت نظام تصنيف لمركز اتصالات شركة Seven Hunderds Apps (سبعمية تطبيق).
 مهمتك الوحيدة: قرر إذا كان سؤال العميل يحتاج بحثاً في قاعدة المعرفة.
 
@@ -34,10 +35,13 @@ Seven Hunderds Apps، سبعمية، سبعمية تطبيق، Seven Hunderds، 
 - ردود قصيرة (أيوه، لا، تمام، شكراً، ماشي)
 - أسئلة شخصية عن المتصل نفسه
 
-رد بكلمة واحدة فقط: yes أو no"""
+رد بـ JSON فقط بدون أي نص خارجه، بالشكل ده:
+{"decision": "yes", "reason": "سبب مختصر بالعربي جملة واحدة"}
+أو
+{"decision": "no", "reason": "سبب مختصر بالعربي جملة واحدة"}"""
 
 # ─── Heuristic ────────────────────────────────────────────────────────────────
-_TRIVIAL_MAX_CHARS = 8
+_TRIVIAL_MAX_CHARS = 2  # كان 8 — عدد كبير جداً يطنش كلمات عربية مفيدة زي "خدماتكم"
 _TRIVIAL_WORDS = {
     "أيوه", "آه", "اه", "ايوه", "نعم", "صح", "تمام", "ماشي", "اوكيه", "أوكيه",
     "اوك", "أوك", "ok", "okay", "yes",
@@ -64,17 +68,17 @@ async def needs_rag(query: str, previous_query: str = "") -> bool:
     ثلاث طبقات:
       1. Heuristic محلي (0ms)   — تحيات وردود قصيرة
       2. Context merge           — لو الجملة قصيرة نضمها مع السابقة
-      3. LLM micro-call (~100ms) — التصنيف الفعلي
+      3. LLM micro-call (~150ms) — التصنيف الفعلي مع السبب
     """
     if not query or not query.strip():
         return False
 
     if _is_trivial(query):
-        logger.debug("Intent heuristic → skip RAG | query=%r", query[:60])
+        logger.info("Intent heuristic → skip RAG | reason=trivial_input | query=%r", query[:60])
         return False
 
     combined = query.strip()
-    if len(combined) < 15 and previous_query:
+    if len(combined) < 25 and previous_query:
         combined = f"{previous_query.strip()} {combined}"
         logger.debug("Intent context merge | combined=%r", combined[:80])
 
@@ -85,18 +89,36 @@ async def needs_rag(query: str, previous_query: str = "") -> bool:
                 {"role": "system", "content": _CLASSIFIER_SYSTEM},
                 {"role": "user", "content": combined},
             ],
-            max_tokens=1,
+            max_tokens=150,
             temperature=0.0,
         )
-        answer = response.choices[0].message.content.strip().lower()
-        result = answer == "yes"
-        logger.debug(
-            "Intent LLM → %s RAG | model=%s query=%r",
-            "use" if result else "skip",
+        raw = response.choices[0].message.content.strip()
+
+        # ─── Parse JSON ───────────────────────────────────────────────────────
+        # نشيل backticks لو الموديل حطهم رغم التعليمات
+        clean = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        parsed = json.loads(clean)
+        decision = str(parsed.get("decision", "")).strip().lower()
+        reason   = str(parsed.get("reason", "")).strip()
+        result   = decision.startswith("yes")
+
+        logger.info(
+            "Intent LLM → %s RAG | reason=%r | model=%s | query=%r",
+            "USE" if result else "SKIP",
+            reason,
             _CLASSIFIER_MODEL,
-            combined[:60],
+            combined[:80],
         )
         return result
+
+    except json.JSONDecodeError:
+        # الموديل ما ردش بـ JSON — نقرا الرد كـ yes/no fallback
+        logger.warning(
+            "Intent classifier returned non-JSON (%r) — falling back to startswith check",
+            raw[:80],
+        )
+        return raw.lower().startswith("yes")
+
     except Exception as exc:
         logger.warning("Intent classifier failed (%s) — falling back to RAG", exc)
         return True
