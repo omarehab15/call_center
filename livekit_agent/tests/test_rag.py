@@ -1,7 +1,15 @@
+from pathlib import Path
+
 import pytest
 
 from agent import Assistant
-from rag import RagConfig, chunk_text, format_rag_results, stable_chunk_id
+from rag import (
+    ChromaRagRetriever,
+    RagConfig,
+    chunk_text,
+    format_rag_results,
+    stable_chunk_id,
+)
 
 
 class FakeRetriever:
@@ -74,6 +82,43 @@ def test_rag_config_defaults_to_lightweight_chroma(monkeypatch: pytest.MonkeyPat
     assert config.embedding_provider == "chroma"
     assert config.embedding_model == "all-MiniLM-L6-v2"
     assert config.collection_name == "call_center_knowledge_chroma"
+    assert config.top_k == 2
+    assert config.max_context_chars == 1000
+
+
+def test_chroma_retriever_warmup_uses_one_light_query() -> None:
+    class FakeCollection:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def query(self, **kwargs: object) -> dict[str, list[list[str]]]:
+            self.calls.append(kwargs)
+            return {"documents": [[]]}
+
+    collection = FakeCollection()
+    retriever = ChromaRagRetriever(
+        RagConfig(
+            enabled=True,
+            chroma_path=Path("unused"),
+            collection_name="test",
+            embedding_provider="chroma",
+            embedding_model="all-MiniLM-L6-v2",
+            top_k=2,
+            max_context_chars=1000,
+            warmup_query="سؤال تسخين",
+        ),
+        collection,
+    )
+
+    retriever.warmup()
+
+    assert collection.calls == [
+        {
+            "query_texts": ["سؤال تسخين"],
+            "n_results": 1,
+            "include": ["documents"],
+        }
+    ]
 
 
 def test_chunk_text_uses_overlap() -> None:

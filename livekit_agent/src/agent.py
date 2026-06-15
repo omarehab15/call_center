@@ -469,7 +469,10 @@ def prewarm(proc: JobProcess) -> None:
         deactivation_threshold=0.4,
     )
     try:
-        proc.userdata["rag_retriever"] = build_rag_from_env()
+        rag_retriever = build_rag_from_env()
+        if rag_retriever is not None and hasattr(rag_retriever, "warmup"):
+            rag_retriever.warmup()
+        proc.userdata["rag_retriever"] = rag_retriever
     except Exception:
         logger.exception("Failed to initialize RAG; continuing without it")
         proc.userdata["rag_retriever"] = None

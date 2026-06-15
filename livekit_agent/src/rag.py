@@ -21,6 +21,7 @@ DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-m3"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_CHROMA_PATH = "rag/chroma"
 DEFAULT_KNOWLEDGE_DIR = "knowledge_base"
+DEFAULT_RAG_WARMUP_QUERY = "ما هي شركة Seven Hunderds Apps؟"
 SUPPORTED_EXTENSIONS = {".md", ".txt", ".html", ".htm", ".json", ".csv"}
 LOCAL_EMBEDDING_PROVIDERS = {"local", "sentence-transformers", "sentence_transformers"}
 
@@ -39,6 +40,7 @@ class RagConfig:
     embedding_model: str
     top_k: int
     max_context_chars: int
+    warmup_query: str = DEFAULT_RAG_WARMUP_QUERY
     device: Optional[str] = None
     embedding_api_key: Optional[str] = None
     embedding_base_url: Optional[str] = None
@@ -56,8 +58,10 @@ class RagConfig:
             or _default_collection_name(provider),
             embedding_provider=provider,
             embedding_model=_embedding_model_from_env(provider),
-            top_k=max(1, _env_int("RAG_TOP_K", 4)),
-            max_context_chars=max(300, _env_int("RAG_MAX_CONTEXT_CHARS", 1800)),
+            top_k=max(1, _env_int("RAG_TOP_K", 2)),
+            max_context_chars=max(300, _env_int("RAG_MAX_CONTEXT_CHARS", 1000)),
+            warmup_query=os.getenv("RAG_WARMUP_QUERY", DEFAULT_RAG_WARMUP_QUERY).strip()
+            or DEFAULT_RAG_WARMUP_QUERY,
             device=os.getenv("RAG_EMBEDDING_DEVICE") or None,
             embedding_api_key=os.getenv("RAG_EMBEDDING_API_KEY")
             or os.getenv("OPENAI_API_KEY"),
@@ -185,6 +189,20 @@ class ChromaRagRetriever:
     def _retrieve_sync(self, query: str) -> str:
         context, _ = self._retrieve_sync_with_chunks(query)
         return context
+
+    def warmup(self) -> None:
+        query = self._config.warmup_query.strip()
+        if not query:
+            return
+        try:
+            self._collection.query(
+                query_texts=[query],
+                n_results=1,
+                include=["documents"],
+            )
+            logger.info("RAG warmup completed with query=%r", query[:80])
+        except Exception:
+            logger.exception("RAG warmup failed")
 
     def _retrieve_sync_with_chunks(self, query: str) -> tuple[str, list[RagChunk]]:
         results = self._collection.query(
