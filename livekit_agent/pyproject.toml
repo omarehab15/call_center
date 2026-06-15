@@ -29,6 +29,10 @@ dev = [
     "ruff",
 ]
 
+[project.scripts]
+chunk-preview = "chunk_preview:main"
+ingest-rag = "ingest_rag:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

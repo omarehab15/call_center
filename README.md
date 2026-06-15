@@ -1,242 +1,194 @@
-<div align="center">
-  <img src="./frontend/.github/assets/template-light.webp" alt="App Icon" width="80" />
-  <h1>Local Voice AI</h1>
-  <p>A fully open-source, real-time voice AI call center agent built for Saudi Arabic dialect.</p>
-  <p>Built on <a href="https://docs.livekit.io/agents?utm_source=local-voice-ai">LiveKit Agents</a> with WebRTC audio, local STT + LLM inference, and cloud TTS.</p>
-</div>
+<a href="https://livekit.io/">
+  <img src="./.github/assets/livekit-mark.png" alt="LiveKit logo" width="100" height="100">
+</a>
 
-## Overview
+# LiveKit Agents Starter - Python
 
-A real-time AI voice assistant for Saudi Arabic call centers, using:
+A complete starter project for building voice AI apps with [LiveKit Agents for Python](https://github.com/livekit/agents) and [LiveKit Cloud](https://cloud.livekit.io/).
 
-- **LiveKit** for WebRTC realtime audio + rooms.
-- **LiveKit Agents (Python)** to orchestrate the STT → LLM → TTS pipeline.
-- **Whisper (via VoxBox)** for Arabic speech-to-text.
-- **llama.cpp** for running local LLMs (OpenAI-compatible API).
-- **Groq Orpheus** for Saudi Arabic text-to-speech (cloud API).
-- **Next.js + Tailwind** frontend UI.
-- Fully containerized via Docker Compose.
+The starter project includes:
 
-## Deployment Options
+- A simple voice AI assistant, ready for extension and customization
+- A voice AI pipeline with [models](https://docs.livekit.io/agents/models) from OpenAI, Cartesia, and AssemblyAI served through LiveKit Cloud
+  - Easily integrate your preferred [LLM](https://docs.livekit.io/agents/models/llm/), [STT](https://docs.livekit.io/agents/models/stt/), and [TTS](https://docs.livekit.io/agents/models/tts/) instead, or swap to a realtime model like the [OpenAI Realtime API](https://docs.livekit.io/agents/models/realtime/openai)
+- Eval suite based on the LiveKit Agents [testing & evaluation framework](https://docs.livekit.io/agents/build/testing/)
+- [LiveKit Turn Detector](https://docs.livekit.io/agents/build/turns/turn-detector/) for contextually-aware speaker detection, with multilingual support
+- [Background voice cancellation](https://docs.livekit.io/home/cloud/noise-cancellation/)
+- Integrated [metrics and logging](https://docs.livekit.io/agents/build/metrics/)
+- A Dockerfile ready for [production deployment](https://docs.livekit.io/agents/ops/deployment/)
 
-### Option A — Single Machine (monolithic)
+This starter app is compatible with any [custom web/mobile frontend](https://docs.livekit.io/agents/start/frontend/) or [SIP-based telephony](https://docs.livekit.io/agents/start/telephony/).
 
-Run everything on one machine. Requires a GPU for acceptable performance.
+## Coding agents and MCP
+
+This project is designed to work with coding agents like [Cursor](https://www.cursor.com/) and [Claude Code](https://www.anthropic.com/claude-code). 
+
+To get the most out of these tools, install the [LiveKit Docs MCP server](https://docs.livekit.io/mcp).
+
+For Cursor, use this link:
+
+[![Install MCP Server](https://cursor.com/deeplink/mcp-install-light.svg)](https://cursor.com/en-US/install-mcp?name=livekit-docs&config=eyJ1cmwiOiJodHRwczovL2RvY3MubGl2ZWtpdC5pby9tY3AifQ%3D%3D)
+
+For Claude Code, run this command:
+
+```
+claude mcp add --transport http livekit-docs https://docs.livekit.io/mcp
+```
+
+For Codex CLI, use this command to install the server:
+```
+codex mcp add --url https://docs.livekit.io/mcp livekit-docs
+```
+
+For Gemini CLI, use this command to install the server:
+```
+gemini mcp add --transport http livekit-docs https://docs.livekit.io/mcp
+```
+
+The project includes a complete [AGENTS.md](AGENTS.md) file for these assistants. You can modify this file  your needs. To learn more about this file, see [https://agents.md](https://agents.md).
+
+## Dev Setup
+
+Clone the repository and install dependencies to a virtual environment:
+
+```console
+cd agent-starter-python
+uv sync
+```
+
+Sign up for [LiveKit Cloud](https://cloud.livekit.io/) then set up the environment by copying `.env.example` to `.env.local` and filling in the required keys:
+
+- `LIVEKIT_URL`
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+
+You can load the LiveKit environment automatically using the [LiveKit CLI](https://docs.livekit.io/home/cli/cli-setup):
 
 ```bash
-# Copy and configure the env file
-cp .env.example .env
-# Edit .env — set your GROQ_API_KEY
-
-# CPU mode
-docker compose up --build
-
-# GPU mode (recommended)
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+lk cloud auth
+lk app env -w -d .env.local
 ```
 
-Then open [http://localhost:3000](http://localhost:3000).
+## Run the agent
 
-### Option B — Split Deployment (local + remote GPU)
+Before your first run, you must download certain models such as [Silero VAD](https://docs.livekit.io/agents/build/turns/vad/) and the [LiveKit turn detector](https://docs.livekit.io/agents/build/turns/turn-detector/):
 
-Run LiveKit + Agent + Frontend locally, with STT + LLM on a remote GPU machine (e.g. vast.ai) connected via Tailscale. See [SPLIT_DEPLOYMENT.md](SPLIT_DEPLOYMENT.md) for full setup.
-
-```bash
-# On the remote GPU machine:
-./start-remote.sh
-
-# On your local machine:
-./start-local.sh
+```console
+uv run python src/agent.py download-files
 ```
 
-## Architecture
+Next, run this command to speak to your agent directly in your terminal:
 
-```
-┌─────────────────────────────┐      ┌──────────────────────────────┐
-│     LOCAL MACHINE           │      │   REMOTE / SAME MACHINE      │
-│                             │      │                              │
-│  Browser ←──WebRTC──→ LiveKit│      │   Whisper STT    (:11435)   │
-│                    (:7880)  │      │   llama.cpp LLM  (:11436)   │
-│  Frontend          (:3000)  │      │                              │
-│                             │      └──────────────────────────────┘
-│  Agent ──── HTTP ──────────────→   (OpenAI-compatible APIs)
-│       └──── HTTPS ──────────────→  Groq Orpheus TTS (cloud)
-└─────────────────────────────┘
+```console
+uv run python src/agent.py console
 ```
 
-### Pipeline per voice turn
-```
-User speaks
-  → Whisper STT (dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8)
-  → LLM (via llama.cpp)
-  → Groq Orpheus TTS (canopylabs/orpheus-arabic-saudi)
-  → Audio back to user via WebRTC
+To run the agent for use with a frontend or telephony, use the `dev` command:
+
+```console
+uv run python src/agent.py dev
 ```
 
-## Agent
+In production, use the `start` command:
 
-The agent entrypoint is `livekit_agent/src/agent.py`. It uses LiveKit Agents OpenAI-compatible plugins:
-
-- `openai.STT` → Whisper (configurable via `STT_PROVIDER` / `STT_BASE_URL` / `STT_MODEL`)
-- `openai.LLM` → llama.cpp (`llama-server`)
-- `openai.TTS` → Groq Orpheus (cloud API)
-- `silero.VAD` for voice activity detection
-- `MultilingualModel` for Arabic turn detection
-
-The agent instructs the LLM to respond in **Saudi Najdi dialect** (`لهجة سعودية نجدية`).
-
-## Environment Variables
-
-### `.env` (monolithic deployment)
-
-| Variable | Default | Description |
-|---|---|---|
-| `STT_PROVIDER` | `whisper` | STT backend |
-| `STT_MODEL` | `dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8` | Whisper model |
-| `LLAMA_HF_REPO` | `bartowski/ALLaM-AI_ALLaM-7B-Instruct-preview-GGUF` | LLM model repo |
-| `LLAMA_HF_FILE` | `ALLaM-AI_ALLaM-7B-Instruct-preview-Q6_K_L.gguf` | LLM model file |
-| `LLAMA_MODEL` | `allam-7b` | Model alias used by agent |
-| `LLAMA_CTX_SIZE` | `8192` | Context window size |
-| `TTS_VOICE` | `fahad` | Groq Orpheus voice |
-| `GROQ_API_KEY` | — | **Required** — Groq API key for TTS |
-
-### Split deployment env files
-
-- `.env.local` — local machine config (see `.env.local.example`)
-- `.env.remote` — remote GPU machine config (see `.env.remote.example`)
-
-## Project Structure
-
-```
-.
-├─ frontend/                    # Next.js UI client
-├─ inference/
-│   ├─ whisper/                 # STT (VoxBox + Whisper)
-│   └─ llama/                   # LLM model cache volume
-├─ livekit_agent/               # Python voice agent (LiveKit Agents)
-│   └─ src/agent.py             # Main agent — STT→LLM→TTS pipeline
-├─ docker-compose.yml           # Monolithic single-machine deployment
-├─ docker-compose.gpu.yml       # GPU overlay for monolithic deployment
-├─ docker-compose.local.yml     # Split deployment: local side
-├─ docker-compose.remote.yml    # Split deployment: remote GPU side
-├─ docker-compose.remote-gpu.yml # GPU overlay for remote side
-├─ start-local.sh               # Helper: start local stack
-└─ start-remote.sh              # Helper: start remote stack
+```console
+uv run python src/agent.py start
 ```
 
-## Notes
+## Frontend & Telephony
 
-- The LLM auto-downloads from Hugging Face on first boot (no manual model download needed).
-- The first run downloads several GB of model weights. GPU-enabled images are bigger and take longer.
-- `llama_cpp` returns 503s while the model is loading. The Compose stack includes healthchecks, and `livekit_agent` waits for `llama_cpp` to be healthy before starting.
+Get started quickly with our pre-built frontend starter apps, or add telephony support:
 
-## Development
+| Platform | Link | Description |
+|----------|----------|-------------|
+| **Web** | [`livekit-examples/agent-starter-react`](https://github.com/livekit-examples/agent-starter-react) | Web voice AI assistant with React & Next.js |
+| **iOS/macOS** | [`livekit-examples/agent-starter-swift`](https://github.com/livekit-examples/agent-starter-swift) | Native iOS, macOS, and visionOS voice AI assistant |
+| **Flutter** | [`livekit-examples/agent-starter-flutter`](https://github.com/livekit-examples/agent-starter-flutter) | Cross-platform voice AI assistant app |
+| **React Native** | [`livekit-examples/voice-assistant-react-native`](https://github.com/livekit-examples/voice-assistant-react-native) | Native mobile app with React Native & Expo |
+| **Android** | [`livekit-examples/agent-starter-android`](https://github.com/livekit-examples/agent-starter-android) | Native Android app with Kotlin & Jetpack Compose |
+| **Web Embed** | [`livekit-examples/agent-starter-embed`](https://github.com/livekit-examples/agent-starter-embed) | Voice AI widget for any website |
+| **Telephony** | [📚 Documentation](https://docs.livekit.io/agents/start/telephony/) | Add inbound or outbound calling to your agent |
 
-Use `.env.local` files in both `frontend` and `livekit_agent` dirs for local (non-Docker) development:
+For advanced customization, see the [complete frontend guide](https://docs.livekit.io/agents/start/frontend/).
 
-```bash
-# Agent
-cd livekit_agent && uv run python src/agent.py dev
+## RAG Knowledge Base
 
-# Frontend
-cd frontend && pnpm dev
+This project supports Retrieval-Augmented Generation (RAG) to give the agent access to a custom knowledge base stored in `knowledge_base/`.
+
+### Recommended workflow
+
+**Step 1 — Preview your chunks before indexing**
+
+Run `chunk_preview.py` to see exactly how your documents will be split before any embedding happens:
+
+```console
+uv run python src/chunk_preview.py
 ```
 
-## SIP Telephony Setup
+This produces `chunks_preview.json`. Open it and review the chunks — you can edit, merge, or remove entries freely before committing them to the vector DB.
 
-This project now includes a SIP provisioning script at `livekit_agent/sip_setup.py` that:
+For Q&A files formatted with `س:/ج:` pairs, each question+answer becomes its own chunk automatically. For all other files, character-based chunking is applied.
 
-- Creates (or reuses) inbound SIP trunk
-- Creates (or reuses) SIP dispatch rule to your agent room
-- Creates (or reuses) outbound SIP trunk
-- Optionally places an outbound call
+Options:
 
-### 1) Fill SIP variables
-
-Web calls and SIP calls are now separated:
-
-- Web stack (default): `redis + livekit + livekit_agent + frontend`
-- SIP stack (optional): `sip` profile
-
-For web only (no SIP):
-
-```bash
-docker compose -f docker-compose.local.yml --env-file .env.local up --build
+```console
+uv run python src/chunk_preview.py --group-by-section   # group Q&A under section headers
+uv run python src/chunk_preview.py --source path/to/dir # use a different knowledge dir
+uv run python src/chunk_preview.py --output my_chunks.json
 ```
 
-To enable SIP too:
+**Step 2 — Ingest from the preview file**
 
-```bash
-docker compose -f docker-compose.local.yml --profile sip --env-file .env.local up --build
+Once you're happy with `chunks_preview.json`, index it into Chroma:
+
+```console
+uv run python src/ingest_rag.py --from-preview chunks_preview.json
 ```
 
-Using `start-local.sh`, set:
+Add `--reset` to wipe the collection and start fresh:
 
-```bash
-SIP_ENABLED=true ./start-local.sh
+```console
+uv run python src/ingest_rag.py --from-preview chunks_preview.json --reset
 ```
 
-For limited-port test environments (for example Vast.ai), use the reduced-RTP overlay:
+**Alternative — Ingest directly (skip preview)**
 
-```bash
-docker compose -f docker-compose.local.yml -f docker-compose.local.vast-sip.yml --profile sip --env-file .env.local up --build
+If you don't need to review chunks first, you can ingest directly from the source files. Q&A files (`س:/ج:` format) are detected and chunked intelligently; other files use character-based chunking:
+
+```console
+uv run python src/ingest_rag.py
 ```
 
-Then set these variables in `.env.local`:
+### Enable RAG in the agent
 
-- `SIP_PROVIDER_NUMBER`
-- `SIP_OUTBOUND_HOST` (your provider termination host/domain, not a phone number)
-- `SIP_DESTINATION_COUNTRY` (example: `US`)
-- `SIP_AUTH_USERNAME` (optional if your provider uses IP-based auth)
-- `SIP_AUTH_PASSWORD` (optional if your provider uses IP-based auth)
-- `SIP_ROOM_NAME` (example: `agent-room`)
-- `SIP_CALL_TO` (optional, needed only when dialing)
-- `SIP_PUBLIC_HOST` (public DNS/IP of your self-hosted SIP service)
+Set `RAG_ENABLED=true` in your `.env.local`. See `.env.example` for all available RAG configuration options (`RAG_EMBEDDING_PROVIDER`, `RAG_TOP_K`, `RAG_CHROMA_PATH`, etc.).
 
-Provider origination URI should point to your self-hosted SIP endpoint, for example:
+## Tests and evals
 
-- TCP: `sip:${SIP_PUBLIC_HOST}:${SIP_SIGNALING_PORT};transport=tcp`
-- UDP: `sip:${SIP_PUBLIC_HOST}:${SIP_SIGNALING_PORT};transport=udp`
-- TLS: `sip:${SIP_PUBLIC_HOST}:${SIP_TLS_PORT};transport=tls`
+This project includes a complete suite of evals, based on the LiveKit Agents [testing & evaluation framework](https://docs.livekit.io/agents/build/testing/). To run them, use `pytest`.
 
-Your SIP provider must be able to reach signaling (`5060`/`5061`) and RTP UDP (`10000-20000`) on that host.
-
-### 2) Provision SIP resources
-
-```bash
-cd livekit_agent
-uv run python sip_setup.py setup
+```console
+uv run pytest
 ```
 
-### 3) Provision and place a test call
+## Using this template repo for your own project
 
-```bash
-cd livekit_agent
-uv run python sip_setup.py setup --call-now --call-to +15559876543
-```
+Once you've started your own project based on this repo, you should:
 
-### 4) Place outbound call only
+1. **Check in your `uv.lock`**: This file is currently untracked for the template, but you should commit it to your repository for reproducible builds and proper configuration management. (The same applies to `livekit.toml`, if you run your agents in LiveKit Cloud)
 
-```bash
-cd livekit_agent
-uv run python sip_setup.py call --call-to +15559876543
-```
+2. **Remove the git tracking test**: Delete the "Check files not tracked in git" step from `.github/workflows/tests.yml` since you'll now want this file to be tracked. These are just there for development purposes in the template repo itself.
 
-Notes:
+3. **Add your own repository secrets**: You must [add secrets](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-your-workflow-does/using-secrets-in-github-actions) for `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` so that the tests can run in CI.
 
-- The script is idempotent by resource name (it reuses existing trunks/rules when names match).
-- If `LIVEKIT_URL` is `ws://` or `wss://`, the script auto-converts it to `http://` or `https://` for server API calls.
-- Run your agent with `uv run python src/agent.py dev` so the room can be handled when calls are dispatched.
+## Deploying to production
 
-## Requirements
+This project is production-ready and includes a working `Dockerfile`. To deploy it to LiveKit Cloud or another environment, see the [deploying to production](https://docs.livekit.io/agents/ops/deployment/) guide.
 
-- Docker + Docker Compose
-- **Groq API key** (for TTS) — get one at [console.groq.com](https://console.groq.com)
-- GPU recommended for STT + LLM (CPU works but is slow)
+## Self-hosted LiveKit
 
-## Credits
+You can also self-host LiveKit instead of using LiveKit Cloud. See the [self-hosting](https://docs.livekit.io/home/self-hosting/) guide for more information. If you choose to self-host, you'll need to also use [model plugins](https://docs.livekit.io/agents/models/#plugins) instead of LiveKit Inference and will need to remove the [LiveKit Cloud noise cancellation](https://docs.livekit.io/home/cloud/noise-cancellation/) plugin.
 
-- Built with [LiveKit](https://livekit.io/) and [LiveKit Agents](https://docs.livekit.io/agents/)
-- STT via Whisper: [VoxBox](https://pypi.org/project/vox-box/)
-- LLM via [llama.cpp](https://github.com/ggml-org/llama.cpp)
-- TTS via [Groq Orpheus](https://console.groq.com/)
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

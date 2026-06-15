@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -301,7 +302,7 @@ def ingest_directory(
 
         relative_source = path.relative_to(source_dir).as_posix()
         collection.delete(where={"source": relative_source})
-        chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
+        chunks = chunk_text_smart(text, chunk_size=chunk_size, overlap=chunk_overlap)
         ids = [
             stable_chunk_id(relative_source, chunk_index)
             for chunk_index in range(len(chunks))
@@ -330,6 +331,73 @@ def iter_knowledge_files(source_dir: Path) -> Iterable[Path]:
         for path in sorted(source_dir.rglob("*"))
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
     )
+
+
+def detect_qa_format(text: str) -> bool:
+    """هل النص فيه Q&A بصيغة س:/ج: ؟"""
+    import re
+    qa_lines = sum(1 for line in text.splitlines() if re.match(r"^\*?\*?س:", line.strip()))
+    return qa_lines >= 3
+
+
+def chunk_qa_individual(text: str) -> list[str]:
+    """كل سؤال + جوابه → chunk منفصل (نفس منطق chunk_preview.py)."""
+    import re
+
+    text = re.sub(r"\*\*\s*(س:)\s*", r"\1 ", text)
+    text = re.sub(r"\*\*\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s+$", "", text, flags=re.MULTILINE)
+
+    chunks: list[str] = []
+    current_q: str | None = None
+    current_a_lines: list[str] = []
+    state = "idle"
+
+    def flush() -> None:
+        nonlocal current_q, current_a_lines, state
+        if current_q and current_a_lines:
+            chunks.append(f"س: {current_q.strip()}\nج: {' '.join(current_a_lines).strip()}")
+        current_q = None
+        current_a_lines = []
+        state = "idle"
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## ") or stripped.startswith("---") or stripped.startswith("# "):
+            if state == "in_answer":
+                flush()
+            continue
+        if not stripped:
+            if state == "in_answer":
+                flush()
+            continue
+        q_match = re.match(r"^س:\s*(.+)", stripped)
+        if q_match:
+            flush()
+            current_q = q_match.group(1).strip()
+            state = "in_question"
+            continue
+        a_match = re.match(r"^ج:\s*(.*)", stripped)
+        if a_match:
+            rest = a_match.group(1).strip()
+            current_a_lines = [rest] if rest else []
+            state = "in_answer"
+            continue
+        if state == "in_answer":
+            current_a_lines.append(stripped)
+
+    flush()
+    return chunks
+
+
+def chunk_text_smart(text: str, *, chunk_size: int, overlap: int) -> list[str]:
+    """
+    Chunking ذكي: لو النص فيه Q&A بصيغة س:/ج: يعمل Q&A chunking،
+    غير كده يرجع للـ character chunking العادي.
+    """
+    if detect_qa_format(text):
+        return chunk_qa_individual(text)
+    return chunk_text(text, chunk_size=chunk_size, overlap=overlap)
 
 
 def chunk_text(text: str, *, chunk_size: int, overlap: int) -> list[str]:
@@ -444,6 +512,101 @@ def _default_collection_name(provider: str) -> str:
     else:
         suffix = provider.replace("-", "_")
     return f"{DEFAULT_COLLECTION_PREFIX}_{suffix}"
+
+
+def ingest_from_preview(
+    config: RagConfig,
+    preview_path: Path,
+    *,
+    reset: bool = False,
+) -> int:
+    """
+    اقرأ chunks_preview.json اللي أنتجه chunk_preview.py واعمل upsert في Chroma.
+    بدل ما تعمل chunking من الأول، بتستخدم الـ chunks اللي راجعتها وعدّلتها.
+    """
+    import chromadb
+
+    if not preview_path.exists():
+        raise FileNotFoundError(f"ملف الـ preview مش موجود: {preview_path}")
+
+    with preview_path.open(encoding="utf-8") as f:
+        data = json.load(f)
+
+    chunks_data: list[dict[str, Any]] = data.get("chunks", [])
+    if not chunks_data:
+        logger.warning("ملف الـ preview فارغ أو مافيش chunks فيه.")
+        return 0
+
+    config.chroma_path.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(config.chroma_path))
+
+    if reset:
+        try:
+            client.delete_collection(config.collection_name)
+        except Exception:
+            logger.info("No existing Chroma collection named %s", config.collection_name)
+
+    collection = client.get_or_create_collection(
+        name=config.collection_name,
+        embedding_function=build_embedding_function(config),
+        metadata={"hnsw:space": "cosine"},
+    )
+
+    # جمّع الـ chunks حسب source عشان نعمل delete قبل upsert لكل ملف
+    from collections import defaultdict
+    by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for chunk in chunks_data:
+        by_source[chunk.get("source", "unknown")].append(chunk)
+
+    total = 0
+    for source, source_chunks in by_source.items():
+        collection.delete(where={"source": source})
+        ids = [stable_chunk_id(source, i) for i in range(len(source_chunks))]
+        documents = [c["text"] for c in source_chunks]
+        metadatas = [
+            {
+                "source": source,
+                "title": Path(source).stem,
+                "chunk": i,
+                "type": c.get("type", "plain"),
+                **({"section": c["section"]} if c.get("section") else {}),
+            }
+            for i, c in enumerate(source_chunks)
+        ]
+        collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        total += len(source_chunks)
+        logger.info("Indexed %d chunks from %s (from preview)", len(source_chunks), source)
+
+    return total
+
+
+def run_ingest_from_preview_cli() -> None:
+    """CLI لـ ingest من chunks_preview.json."""
+    import argparse
+
+    load_dotenv(".env.local")
+    parser = argparse.ArgumentParser(
+        description="Index pre-chunked knowledge from a chunks_preview.json file into Chroma."
+    )
+    parser.add_argument(
+        "--from-preview",
+        required=True,
+        metavar="CHUNKS_JSON",
+        help="مسار ملف chunks_preview.json اللي أنتجه chunk_preview.py",
+    )
+    parser.add_argument("--reset", action="store_true", help="احذف الـ collection وابدأ من الأول.")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    config = RagConfig.from_env(force_enabled=True)
+    preview_path = Path(args.from_preview)
+
+    print(f"\n📂 قراءة الـ chunks من: {preview_path}")
+    count = ingest_from_preview(config, preview_path, reset=args.reset)
+    print(
+        f"✅ تم الـ indexing: {count} chunk في Chroma collection "
+        f"'{config.collection_name}' في {config.chroma_path}\n"
+    )
 
 
 def _first_result_list(value: Any) -> list[Any]:
