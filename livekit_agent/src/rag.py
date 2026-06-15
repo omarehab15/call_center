@@ -65,6 +65,14 @@ class RagConfig:
         )
 
 
+@dataclass(frozen=True)
+class RagChunk:
+    text: str
+    source: str
+    distance: float
+    chunk_index: int
+
+
 class LocalSentenceTransformerEmbeddingFunction:
     def __init__(self, model_name: str, device: Optional[str] = None) -> None:
         try:
