@@ -337,7 +337,9 @@ class Assistant(Agent):
         self.notes: list[str] = []
 
     async def on_enter(self) -> None:
+        import time as _time
         self.call_logger.log_system_event("Call started - Agent initialized")
+        _t = self.call_logger.start_timer()
         await self.session.generate_reply(
             user_input="...",
             instructions=(
@@ -345,6 +347,7 @@ class Assistant(Agent):
                 "[هلا بيك معك فهد ممكن اعرف اسمك الكريم] "
             ),
         )
+        self.call_logger.log_timing("LLM", "Opening greeting generated", _time.monotonic() - _t)
 
     def log_agent_message(self, message: str) -> None:
         self.call_logger.log_agent_message(message)
@@ -361,14 +364,25 @@ class Assistant(Agent):
         turn_ctx: ChatContext,
         new_message: ChatMessage,
     ) -> None:
+        import time as _time
+        _t_turn_start = _time.monotonic()
         query = _message_text(new_message)
         if query:
             self.call_logger.log_user_message(query)
+            self.call_logger.log_timing("STT", "User turn transcription delivered", _time.monotonic() - _t_turn_start,
+                                        extra=f"chars={len(query)}")
 
         if self.rag_retriever is None or not query:
             return
 
-        if not await needs_rag(query, previous_query=self._last_query):
+        # ── Intent classifier timing ───────────────────────────────────────────
+        import time as _time
+        _t_intent = self.call_logger.start_timer()
+        intent_result = await needs_rag(query, previous_query=self._last_query)
+        self.call_logger.log_timing("INTENT", "Intent classifier", _time.monotonic() - _t_intent,
+                                    extra=f"decision={'YES→RAG' if intent_result else 'NO→skip'}")
+
+        if not intent_result:
             self.call_logger.log_system_event("RAG skipped — intent classifier: no knowledge lookup needed")
             self._last_query = query
             return
@@ -376,12 +390,16 @@ class Assistant(Agent):
         self._last_query = query
         try:
             self.call_logger.log_system_event(f"RAG lookup started — query: {query[:120]}")
+            # ── RAG retrieval timing ───────────────────────────────────────────
+            _t_rag = self.call_logger.start_timer()
             # retrieve_with_chunks بيرجع الـ context + list من الـ chunks للـ log
             if hasattr(self.rag_retriever, "retrieve_with_chunks"):
                 rag_content, rag_chunks = await self.rag_retriever.retrieve_with_chunks(query)
             else:
                 rag_content = await self.rag_retriever.retrieve(query)
                 rag_chunks = []
+            self.call_logger.log_timing("RAG", "RAG retrieval", _time.monotonic() - _t_rag,
+                                        extra=f"chunks={len(rag_chunks)} chars={len(rag_content)}")
         except Exception as exc:
             msg = f"RAG lookup failed: {exc}"
             logger.exception("RAG lookup failed")
@@ -579,14 +597,39 @@ async def my_agent(ctx: JobContext) -> None:
     recorder.install()
 
     # ── Event handlers ────────────────────────────────────────────────────────
+    _llm_reply_start: dict[str, float] = {}  # track per-item start time
+
+    _tts_start: dict[str, float] = {}
+
+    @session.on("agent_speaking_started")
+    def on_agent_speaking_started(event: Any) -> None:
+        import time as _time
+        _now = _time.monotonic()
+        _llm_reply_start["t"] = _now
+        _tts_start["t"] = _now
+        assistant.call_logger.log_system_event("TTS playback started", stage="TTS")
+
+    @session.on("agent_speaking_stopped")
+    def on_agent_speaking_stopped(event: Any) -> None:
+        import time as _time
+        if "t" in _tts_start:
+            elapsed = _time.monotonic() - _tts_start.pop("t")
+            assistant.call_logger.log_timing("TTS", "TTS playback duration", elapsed)
+
     @session.on("conversation_item_added")
     def on_conversation_item_added(event: Any) -> None:
+        import time as _time
         message = getattr(event, "item", None)
         if getattr(message, "role", None) != "assistant":
             return
         text = _message_text(message)
         if text:
             assistant.log_agent_message(text)
+            # LLM→TTS pipeline: measure from when speaking started (if captured)
+            if "t" in _llm_reply_start:
+                elapsed = _time.monotonic() - _llm_reply_start.pop("t")
+                assistant.call_logger.log_timing("LLM", "LLM reply generated", elapsed,
+                                                 extra=f"chars={len(text)}")
 
     @session.on("close")
     def on_session_close(event: Any) -> None:

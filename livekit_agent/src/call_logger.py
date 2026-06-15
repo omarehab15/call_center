@@ -26,6 +26,7 @@ This lets you reconstruct the exact sequence of steps when something goes wrong.
 
 import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -81,6 +82,24 @@ class CallLogger:
     def log_rag_event(self, event: str):
         """Log a RAG-specific step (query, hit count, chars injected, etc.)."""
         self._write("🔍 RAG  ", "RAG    ", event)
+
+    def start_timer(self) -> float:
+        """Return the current monotonic time (seconds). Pass to log_timing later."""
+        return time.monotonic()
+
+    def log_timing(self, stage: str, label: str, elapsed_sec: float, extra: str = "") -> None:
+        """Log how long a pipeline step took.
+
+        Args:
+            stage:       Pipeline stage name (e.g. 'STT', 'RAG', 'LLM', 'TTS', 'INTENT')
+            label:       Short description of the operation
+            elapsed_sec: Wall-clock seconds returned by ``time.monotonic()`` diff
+            extra:       Optional extra info appended to the line (e.g. chars, tokens)
+        """
+        ms = elapsed_sec * 1000
+        extra_str = f"  |  {extra}" if extra else ""
+        msg = f"⏱  {label} took {ms:.0f} ms{extra_str}"
+        self._write("⏱  TIME", f"{stage:<7}", msg)
 
     def log_error(self, error: str, stage: str = "ERROR"):
         """Log an error — include stage name so you know where it broke."""
