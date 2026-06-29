@@ -24,6 +24,8 @@ from livekit import rtc as lk_audio
 from livekit.agents import stt as stt_module
 from livekit.agents.voice.recorder_io import RecorderIO
 from livekit.plugins import ai_coustics, noise_cancellation, openai, silero
+from livekit.plugins import groq as groq_plugin
+from livekit.plugins import google as google_plugin
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from call_logger import CallLogger
@@ -487,34 +489,19 @@ async def my_agent(ctx: JobContext) -> None:
         ctx.job.agent_name,
     )
 
-    # ── STT ──────────────────────────────────────────────────────────────────
-    stt_provider = os.getenv("STT_PROVIDER", "whisper").lower()
-    if stt_provider == "whisper":
-        default_stt_base_url = "http://whisper:80/v1"
-        default_stt_model    = "whisper-large-v3"
-    else:
-        default_stt_base_url = "http://nemotron:8000/v1"
-        default_stt_model    = "nemotron-speech-streaming"
+    # ── STT ── Groq Whisper cloud ─────────────────────────────────────────────
+    stt_model = os.getenv("STT_MODEL", "whisper-large-v3")
+    logger.info("Starting agent with STT provider=groq model=%s", stt_model)
 
-    stt_base_url = os.getenv("STT_BASE_URL", default_stt_base_url)
-    stt_model    = os.getenv("STT_MODEL",    default_stt_model)
-    stt_api_key  = os.getenv("STT_API_KEY",  "no-key-needed")
-
-    logger.info(
-        "Starting agent with STT provider=%s model=%s base_url=%s",
-        stt_provider, stt_model, stt_base_url,
+    # ── TTS ── Gemini 2.5 Flash (Google AI Studio) ───────────────────────────
+    tts_voice_name = os.getenv("TTS_VOICE_NAME", "Aoede")
+    tts_instance = google_plugin.TTS(
+        model="gemini-2.5-flash-preview-tts",
+        voice_name=tts_voice_name,
+        language_code="ar-SA",
+        api_key=os.getenv("GOOGLE_AI_API_KEY", ""),
     )
-
-    # ── TTS ──────────────────────────────────────────────────────────────────
-    tts_voice    = os.getenv("TTS_VOICE", "fahad")
-    tts_instance = openai.TTS(
-        base_url="https://api.groq.com/openai/v1",
-        model="canopylabs/orpheus-arabic-saudi",
-        voice=tts_voice,
-        api_key=os.getenv("GROQ_API_KEY", ""),
-        response_format="wav",
-    )
-    logger.info("TTS voice=%s", tts_voice)
+    logger.info("TTS provider=gemini-2.5-flash voice=%s", tts_voice_name)
 
     # ── LLM ──────────────────────────────────────────────────────────────────
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
@@ -523,22 +510,14 @@ async def my_agent(ctx: JobContext) -> None:
     turn_detector = MultilingualModel()
     session = AgentSession(
         stt=stt_module.StreamAdapter(
-            stt=openai.STT(
-                base_url=stt_base_url,
+            stt=groq_plugin.STT(
                 model=stt_model,
-                api_key=stt_api_key,
                 language="ar",
-                # Improved prompt: seeds Whisper with Saudi dialect vocabulary
-                # and common call-centre phrases so the model biases toward
-                # the correct transcription path from the first token.
                 prompt=(
                     "محادثة خدمة عملاء باللهجة السعودية النجدية. "
                     "كلمات شائعة: وش، كيفك، إيش، زين، ابشر، تمام، والله، يعني، "
                     "حياك، شلونك، عندي مشكلة، رقم الطلب، الحساب، خدمة العملاء."
                 ),
-                # Language is fixed to Arabic — disable auto-detection to
-                # save ~20 ms of per-utterance latency.
-                detect_language=False,
             ),
             vad=ctx.proc.userdata["vad"],
         ),

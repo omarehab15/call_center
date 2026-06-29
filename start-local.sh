@@ -25,48 +25,14 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
-if [ -z "${STT_BASE_URL:-}" ]; then
-  echo "ERROR: STT_BASE_URL is missing in $ENV_FILE."
-  echo "Set it to your vast.ai/Tailscale STT endpoint (example: http://100.64.0.5:11435/v1)."
-  exit 1
-fi
-
-if [[ "$STT_BASE_URL" == *"100.x.x.x"* ]]; then
-  echo "ERROR: Please update STT_BASE_URL in $ENV_FILE with your actual vast.ai Tailscale IP."
-  echo "Example: STT_BASE_URL=http://100.64.0.5:11435/v1"
-  exit 1
-fi
-
-# Normalize STT models endpoint to check connectivity
-STT_MODELS_ENDPOINT="${STT_BASE_URL%/}/models"
-
 echo "========================================"
 echo "  Starting local stack"
 echo "========================================"
 echo ""
-echo "Remote STT endpoint: $STT_BASE_URL"
+echo "  STT  → Groq Whisper cloud"
+echo "  LLM  → Groq cloud"
+echo "  TTS  → Gemini 2.5 Flash (Google AI Studio)"
 echo ""
-
-echo "Checking remote STT connectivity..."
-FAILED=0
-if curl -sf --connect-timeout 5 "$STT_MODELS_ENDPOINT" > /dev/null 2>&1; then
-  echo "  ✓ STT endpoint reachable ($STT_MODELS_ENDPOINT)"
-else
-  echo "  ✗ STT endpoint NOT reachable ($STT_MODELS_ENDPOINT)"
-  FAILED=1
-fi
-
-if [ "$FAILED" -eq 1 ]; then
-  echo ""
-  echo "WARNING: Remote STT endpoint is not reachable."
-  echo "Make sure Whisper is running on the vast.ai machine (./start-remote.sh)"
-  echo ""
-  read -r -p "Continue anyway? (y/N): " choice
-  case "$choice" in
-    y|Y) echo "Continuing..." ;;
-    *) exit 1 ;;
-  esac
-fi
 
 COMPOSE_FILES=(-f docker-compose.local.yml)
 COMPOSE_ARGS=()
@@ -299,7 +265,7 @@ echo ""
 echo "Services:"
 echo "  • Frontend      → http://localhost:3000"
 echo "  • LiveKit       → ws://localhost:7880"
-echo "  • Agent         → connecting to remote STT + Groq LLM/TTS"
+echo "  • Agent         → STT: Groq Whisper | LLM: Groq | TTS: Gemini 2.5 Flash"
 if [ "${SIP_ENABLED:-false}" = "true" ] || [ "${SIP_TEST_PROFILE:-}" = "vast" ]; then
   echo "  • SIP signaling → ${SIP_PUBLIC_HOST:-<set SIP_PUBLIC_HOST>}:${SIP_SIGNALING_PORT:-5060}"
   echo "  • Noise cancel  → BVCTelephony (telephony mode)"

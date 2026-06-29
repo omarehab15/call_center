@@ -43,28 +43,14 @@ RUN --mount=type=cache,target=/app/.cache/uv,uid=10001,gid=10001 \
     UV_CACHE_DIR=/app/.cache/uv \
     uv sync --locked --no-dev
 
-# FIX: Pre-download model files needed at runtime.
+# Pre-download model files at build time.
 #
-# silero.VAD.load()
-#   Downloads the silero ONNX model (~2 MB) into the HF cache.
-#
-# _EUORunnerMultilingual._download_files()
-#   Downloads the turn-detector multilingual model files:
-#     - model_q8.onnx   (~45 MB)
-#     - languages.json  (~2 KB)
-#     - tokenizer files (~1 MB)
-#   This is the internal classmethod that downloads without needing a
-#   job context (unlike MultilingualModel() which calls get_job_context()
-#   and raises RuntimeError at build time).
-#
-# ai-coustics and noise-cancellation are intentionally excluded — they
-# contact external licensing APIs at build time and hang in CI/offline envs.
-RUN uv run python -c "\
-from livekit.plugins import silero; \
-from livekit.plugins.turn_detector.multilingual import _EUORunnerMultilingual; \
-silero.VAD.load(); \
-_EUORunnerMultilingual._download_files(); \
-print('All model files pre-downloaded successfully.')"
+# livekit-agents 1.6.x ships a built-in CLI command `download-files`
+# that downloads all required model files (silero VAD, turn-detector
+# multilingual ONNX, tokenizer files, etc.) in one shot.
+# This replaces the old approach of calling private internal APIs
+# (_EUORunnerMultilingual._download_files) which no longer exist in 1.6.x.
+RUN uv run python -m livekit.agents download-files
 
 # Chroma's default embedding function downloads all-MiniLM-L6-v2 on first use.
 # Do it at build time with a no-read-timeout stream so startup/ingest do not

@@ -99,15 +99,17 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
       - LIVEKIT_AGENT_NAME=${LIVEKIT_AGENT_NAME:-}
-      # STT — remote (via Tailscale)
-      - STT_PROVIDER=${STT_PROVIDER:-whisper}
-      - STT_BASE_URL=${STT_BASE_URL}
-      - STT_MODEL=${STT_MODEL:-dev-ahmedhany/whisper-large-v3-arabic-ft-v3-ct2-int8}
-      - STT_API_KEY=${STT_API_KEY:-no-key-needed}
-      # LLM + TTS — Groq cloud
+      # STT — Groq Whisper cloud
+      - STT_PROVIDER=${STT_PROVIDER:-groq}
+
+      - STT_MODEL=${STT_MODEL:-whisper-large-v3}
+
+      # LLM — Groq cloud
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - TTS_VOICE=${TTS_VOICE:-fahad}
+      # TTS — Gemini 2.5 Flash (Google AI Studio)
+      - TTS_VOICE_NAME=${TTS_VOICE_NAME:-Aoede}
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
       # SIP mode — enables BVCTelephony noise cancellation automatically
       - SIP_ENABLED=${SIP_ENABLED:-false}
       # Agent-side input noise cancellation: off, quail_vf_l, ai_coustics, nc, bvc, bvc_telephony
