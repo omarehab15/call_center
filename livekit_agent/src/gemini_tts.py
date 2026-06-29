@@ -92,22 +92,31 @@ class GeminiAIStudioTTS(tts.TTS):
         *,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "ChunkedStream":
-        return ChunkedStream(tts=self, input_text=text, opts=self._opts)
+        return ChunkedStream(
+            tts=self, input_text=text, opts=self._opts, conn_options=conn_options
+        )
 
     def stream(
         self,
         *,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "SynthesizeStream":
-        return SynthesizeStream(tts=self, opts=self._opts)
+        return SynthesizeStream(tts=self, opts=self._opts, conn_options=conn_options)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ChunkedStream  (non-streaming synthesis)
 # ══════════════════════════════════════════════════════════════════════════════
 class ChunkedStream(tts.ChunkedStream):
-    def __init__(self, *, tts: GeminiAIStudioTTS, input_text: str, opts: _TTSOptions) -> None:
-        super().__init__(tts=tts, input_text=input_text)
+    def __init__(
+        self,
+        *,
+        tts: GeminiAIStudioTTS,
+        input_text: str,
+        opts: _TTSOptions,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> None:
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._opts = opts
 
     async def _run(self) -> None:
@@ -207,9 +216,16 @@ class SynthesizeStream(tts.SynthesizeStream):
     We buffer all text then synthesize once on flush.
     """
 
-    def __init__(self, *, tts: GeminiAIStudioTTS, opts: _TTSOptions) -> None:
-        super().__init__(tts=tts)
+    def __init__(
+        self,
+        *,
+        tts: GeminiAIStudioTTS,
+        opts: _TTSOptions,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> None:
+        super().__init__(tts=tts, conn_options=conn_options)
         self._opts = opts
+        self._conn_options = conn_options
         self._text_buf: list[str] = []
 
     async def _run(self) -> None:
@@ -223,7 +239,12 @@ class SynthesizeStream(tts.SynthesizeStream):
                 self._text_buf.append(data)
 
     async def _synthesize(self, text: str) -> None:
-        chunked = ChunkedStream(tts=self._tts, input_text=text, opts=self._opts)
+        chunked = ChunkedStream(
+            tts=self._tts,
+            input_text=text,
+            opts=self._opts,
+            conn_options=self._conn_options,
+        )
         async with chunked:
             async for ev in chunked:
                 self._event_ch.send_nowait(ev)
