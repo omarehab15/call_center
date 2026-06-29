@@ -23,12 +23,20 @@ from livekit.agents import (
 from livekit import rtc as lk_audio
 from livekit.agents import stt as stt_module
 from livekit.agents.voice.recorder_io import RecorderIO
-from livekit.plugins import ai_coustics, noise_cancellation, openai, silero
+from livekit.plugins import noise_cancellation, openai, silero
 from livekit.plugins import groq as groq_plugin
-from livekit.plugins import google as google_plugin
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+# ai_coustics requires LiveKit Cloud — import only if available
+try:
+    from livekit.plugins import ai_coustics
+    _AI_COUSTICS_AVAILABLE = True
+except ImportError:
+    _AI_COUSTICS_AVAILABLE = False
+
+
 from call_logger import CallLogger
+from gemini_tts import GeminiAIStudioTTS
 from intent_classifier import needs_rag
 from rag import RagRetriever, build_rag_from_env
 
@@ -493,13 +501,13 @@ async def my_agent(ctx: JobContext) -> None:
     stt_model = os.getenv("STT_MODEL", "whisper-large-v3")
     logger.info("Starting agent with STT provider=groq model=%s", stt_model)
 
-    # ── TTS ── Gemini 2.5 Flash (Google AI Studio) ───────────────────────────
-    tts_voice_name = os.getenv("TTS_VOICE_NAME", "Aoede")
-    tts_instance = google_plugin.TTS(
-        model="gemini-2.5-flash-preview-tts",
+    # ── TTS ── Gemini 2.5 Flash via Google AI Studio ─────────────────────────
+    tts_voice_name = os.getenv("TTS_VOICE_NAME", "Puck")
+    tts_instance = GeminiAIStudioTTS(
+        api_key=os.getenv("GOOGLE_AI_API_KEY"),
         voice_name=tts_voice_name,
         language_code="ar-SA",
-        api_key=os.getenv("GOOGLE_AI_API_KEY", ""),
+        model="gemini-2.5-flash-preview-tts",
     )
     logger.info("TTS provider=gemini-2.5-flash voice=%s", tts_voice_name)
 
@@ -726,15 +734,19 @@ def _build_room_options() -> Optional[room_io.RoomOptions]:
 
 
 def _build_noise_cancellation() -> Any | None:
-    # Default changed to quail_vf_l — best voice isolation for WebRTC calls
-    # in diverse environments (car, street, open office).
-    provider = os.getenv("AGENT_NOISE_CANCELLATION", "quail_vf_l").strip().lower()
+    provider = os.getenv("AGENT_NOISE_CANCELLATION", "off").strip().lower()
     if provider in {"", "off", "false", "0", "no", "none"}:
         return None
     if provider in {"ai_coustics", "ai-coustics", "quail", "quail_l"}:
+        if not _AI_COUSTICS_AVAILABLE:
+            logger.warning("ai_coustics not available; noise cancellation disabled")
+            return None
         logger.info("Agent noise cancellation enabled: ai_coustics QUAIL_L")
         return ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_L)
     if provider in {"ai_coustics_voice_focus", "ai-coustics-voice-focus", "quail_vf_l", "voice_focus"}:
+        if not _AI_COUSTICS_AVAILABLE:
+            logger.warning("ai_coustics not available; noise cancellation disabled")
+            return None
         logger.info("Agent noise cancellation enabled: ai_coustics QUAIL_VF_L")
         return ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_VF_L)
     if provider in {"krisp", "noise_cancellation", "noise-cancellation", "nc"}:
