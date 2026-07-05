@@ -548,6 +548,26 @@ async def my_agent(ctx: JobContext) -> None:
         rag_retriever=ctx.proc.userdata.get("rag_retriever"),
     )
 
+    # Wire TTS generation timing into the per-call log.
+    # tts_instance is created before `assistant` (and its call_logger) exist,
+    # so we attach the callback here rather than at construction time.
+    def _on_tts_timing(event) -> None:
+        if event.success:
+            assistant.call_logger.log_timing(
+                "TTS",
+                "Gemini TTS generation",
+                event.elapsed_sec,
+                extra=f"chars={event.char_count} audio_bytes={event.audio_bytes}",
+            )
+        else:
+            assistant.call_logger.log_error(
+                f"Gemini TTS generation FAILED after {event.elapsed_sec:.2f}s "
+                f"(chars={event.char_count}, text='{event.text_preview}'): {event.error}",
+                stage="TTS",
+            )
+
+    tts_instance.on_timing = _on_tts_timing
+
     session_room_options = _build_room_options()
 
     # ── Loudness normalization ────────────────────────────────────────────────
