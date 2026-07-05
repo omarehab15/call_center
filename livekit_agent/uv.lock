@@ -1501,6 +1501,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "livekit-agents", extra = ["google", "groq", "openai", "silero", "turn-detector"] },
     { name = "livekit-plugins-ai-coustics" },
+    { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-google" },
     { name = "livekit-plugins-groq" },
     { name = "livekit-plugins-noise-cancellation" },
@@ -1526,6 +1527,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.0" },
     { name = "livekit-agents", extras = ["silero", "turn-detector", "openai", "groq", "google"], specifier = ">=1.5,<2.0" },
     { name = "livekit-plugins-ai-coustics", specifier = ">=0.2.0" },
+    { name = "livekit-plugins-elevenlabs", specifier = ">=1.6" },
     { name = "livekit-plugins-google", specifier = ">=1.5,<2.0" },
     { name = "livekit-plugins-groq", specifier = ">=0.1" },
     { name = "livekit-plugins-noise-cancellation", specifier = "~=0.2" },
@@ -1707,6 +1709,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e2/03/0c570e8b0979edf0c8909ef01c6337ad8dc9ab3cfa4a138c2f8a25967fe0/livekit_plugins_ai_coustics-0.2.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:a50b976dd25312a835987a349cba91361e450fb4361daea137b3e0e58ae95f2d", size = 81433204, upload-time = "2026-02-24T18:23:16.04Z" },
     { url = "https://files.pythonhosted.org/packages/08/e8/fd5d25720e57dc27769d5e04916c822503dce627d2addf8d07f5b934979f/livekit_plugins_ai_coustics-0.2.0-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:94bd0c0537eb6c66eeab4b51e2d18f82c340496bfbee5d36c45d06b13d34205c", size = 80799494, upload-time = "2026-02-24T18:23:20.294Z" },
     { url = "https://files.pythonhosted.org/packages/0c/51/ed09c6b8c0ddd2ff88585acb4fb7571699daddf6367029da3a3073587062/livekit_plugins_ai_coustics-0.2.0-cp39-abi3-win_amd64.whl", hash = "sha256:867da3c1e09db2dbf8c4f0d8aa60c6c776d470ce579da9522f8fb9c9761d06a0", size = 80278473, upload-time = "2026-02-24T18:23:24.919Z" },
+]
+
+[[package]]
+name = "livekit-plugins-elevenlabs"
+version = "1.6.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "livekit-agents", extra = ["codecs"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d7/ec/c4d5283794a74f0d8b30f7e085f68337f1e7de8ffc39740d55bb870ab1cc/livekit_plugins_elevenlabs-1.6.4.tar.gz", hash = "sha256:a7775ef2a339a96024b4fde84d7ebb7f1d2ae4412d11893e031e13e9c1c899cb", size = 18328, upload-time = "2026-06-24T20:49:48.538Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/8d/600ec65d8f282ebbb8e3ed4d37b70b86bdc1d3da385b8e6f3f5b94e148f7/livekit_plugins_elevenlabs-1.6.4-py3-none-any.whl", hash = "sha256:a88f441d219025ce685110fb6146fffd51b38514475f4964d7f68cb7539bddf8", size = 20888, upload-time = "2026-06-24T20:49:47.519Z" },
 ]
 
 [[package]]

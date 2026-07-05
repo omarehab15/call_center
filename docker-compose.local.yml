@@ -107,7 +107,14 @@ services:
       # LLM — Groq cloud
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      # TTS — Gemini 2.5 Flash (Google AI Studio)
+      # TTS — provider switch: elevenlabs | gemini
+      - TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs}
+      # TTS — ElevenLabs
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-eleven_turbo_v2_5}
+      - ELEVENLABS_LANGUAGE=${ELEVENLABS_LANGUAGE:-ar}
+      # TTS — Gemini 2.5 Flash (Google AI Studio), used only if TTS_PROVIDER=gemini
       - TTS_VOICE_NAME=${TTS_VOICE_NAME:-Aoede}
       - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
       # SIP mode — enables BVCTelephony noise cancellation automatically

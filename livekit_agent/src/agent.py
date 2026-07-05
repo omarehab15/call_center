@@ -22,8 +22,10 @@ from livekit.agents import (
 )
 from livekit import rtc as lk_audio
 from livekit.agents import stt as stt_module
+from livekit.agents.metrics import TTSMetrics
 from livekit.agents.voice.recorder_io import RecorderIO
 from livekit.plugins import noise_cancellation, openai, silero
+from livekit.plugins import elevenlabs as elevenlabs_plugin
 from livekit.plugins import groq as groq_plugin
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -501,15 +503,36 @@ async def my_agent(ctx: JobContext) -> None:
     stt_model = os.getenv("STT_MODEL", "whisper-large-v3")
     logger.info("Starting agent with STT provider=groq model=%s", stt_model)
 
-    # ── TTS ── Gemini 2.5 Flash via Google AI Studio ─────────────────────────
-    tts_voice_name = os.getenv("TTS_VOICE_NAME", "Puck")
-    tts_instance = GeminiAIStudioTTS(
-        api_key=os.getenv("GOOGLE_AI_API_KEY"),
-        voice_name=tts_voice_name,
-        language_code="ar-SA",
-        model="gemini-2.5-flash-preview-tts",
-    )
-    logger.info("TTS provider=gemini-2.5-flash voice=%s", tts_voice_name)
+    # ── TTS ── provider switch, controlled by TTS_PROVIDER in .env.local ──────
+    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+
+    if tts_provider == "elevenlabs":
+        elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID") or elevenlabs_plugin.DEFAULT_VOICE_ID
+        elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+        elevenlabs_language = os.getenv("ELEVENLABS_LANGUAGE", "ar")
+        tts_instance = elevenlabs_plugin.TTS(
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=elevenlabs_voice_id,
+            model=elevenlabs_model,
+            language=elevenlabs_language,
+        )
+        logger.info(
+            "TTS provider=elevenlabs model=%s voice_id=%s language=%s",
+            elevenlabs_model, elevenlabs_voice_id, elevenlabs_language,
+        )
+    elif tts_provider == "gemini":
+        tts_voice_name = os.getenv("TTS_VOICE_NAME", "Puck")
+        tts_instance = GeminiAIStudioTTS(
+            api_key=os.getenv("GOOGLE_AI_API_KEY"),
+            voice_name=tts_voice_name,
+            language_code="ar-SA",
+            model="gemini-2.5-flash-preview-tts",
+        )
+        logger.info("TTS provider=gemini-2.5-flash voice=%s", tts_voice_name)
+    else:
+        raise ValueError(
+            f"Unknown TTS_PROVIDER={tts_provider!r}. Expected 'elevenlabs' or 'gemini'."
+        )
 
     # ── LLM ──────────────────────────────────────────────────────────────────
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
@@ -551,22 +574,29 @@ async def my_agent(ctx: JobContext) -> None:
     # Wire TTS generation timing into the per-call log.
     # tts_instance is created before `assistant` (and its call_logger) exist,
     # so we attach the callback here rather than at construction time.
-    def _on_tts_timing(event) -> None:
-        if event.success:
-            assistant.call_logger.log_timing(
-                "TTS",
-                "Gemini TTS generation",
-                event.elapsed_sec,
-                extra=f"chars={event.char_count} audio_bytes={event.audio_bytes}",
-            )
-        else:
-            assistant.call_logger.log_error(
-                f"Gemini TTS generation FAILED after {event.elapsed_sec:.2f}s "
-                f"(chars={event.char_count}, text='{event.text_preview}'): {event.error}",
-                stage="TTS",
-            )
+    # NOTE: `on_timing` is a custom hook implemented only by GeminiAIStudioTTS
+    # (src/gemini_tts.py). The stock livekit.plugins.elevenlabs.TTS doesn't
+    # expose it — per-request generation timing for ElevenLabs isn't logged
+    # here, but the generic "TTS playback duration" event below (wired via
+    # session.on("agent_speaking_started"/"agent_speaking_stopped")) still
+    # works the same regardless of provider.
+    if hasattr(tts_instance, "on_timing"):
+        def _on_tts_timing(event) -> None:
+            if event.success:
+                assistant.call_logger.log_timing(
+                    "TTS",
+                    "Gemini TTS generation",
+                    event.elapsed_sec,
+                    extra=f"chars={event.char_count} audio_bytes={event.audio_bytes}",
+                )
+            else:
+                assistant.call_logger.log_error(
+                    f"Gemini TTS generation FAILED after {event.elapsed_sec:.2f}s "
+                    f"(chars={event.char_count}, text='{event.text_preview}'): {event.error}",
+                    stage="TTS",
+                )
 
-    tts_instance.on_timing = _on_tts_timing
+        tts_instance.on_timing = _on_tts_timing
 
     session_room_options = _build_room_options()
 
@@ -625,6 +655,26 @@ async def my_agent(ctx: JobContext) -> None:
         if "t" in _tts_start:
             elapsed = _time.monotonic() - _tts_start.pop("t")
             assistant.call_logger.log_timing("TTS", "TTS playback duration", elapsed)
+
+    # Provider-agnostic TTS success/timing log. Unlike the Gemini-only
+    # `on_timing` hook above (custom to gemini_tts.py), this uses the
+    # standard livekit-agents metrics event, which every TTS plugin
+    # (elevenlabs, gemini, etc.) emits after each synthesis call — this is
+    # what shows "did TTS work and how long did it take" for ElevenLabs.
+    @session.on("metrics_collected")
+    def on_metrics_collected(event: Any) -> None:
+        m = getattr(event, "metrics", None)
+        if isinstance(m, TTSMetrics):
+            assistant.call_logger.log_timing(
+                "TTS",
+                f"{tts_provider} TTS generation",
+                m.duration,
+                extra=(
+                    f"chars={m.characters_count} ttfb={m.ttfb:.3f}s "
+                    f"audio_duration={m.audio_duration:.2f}s"
+                    + (" CANCELLED" if m.cancelled else "")
+                ),
+            )
 
     @session.on("conversation_item_added")
     def on_conversation_item_added(event: Any) -> None:
