@@ -99,24 +99,19 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
       - LIVEKIT_AGENT_NAME=${LIVEKIT_AGENT_NAME:-}
-      # STT — Groq Whisper cloud
-      - STT_PROVIDER=${STT_PROVIDER:-groq}
-
-      - STT_MODEL=${STT_MODEL:-whisper-large-v3}
+      # STT — Deepgram Nova-3
+      - STT_MODEL=${STT_MODEL:-nova-3}
+      - STT_LANGUAGE=${STT_LANGUAGE:-ar-SA}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
 
       # LLM — Groq cloud
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      # TTS — provider switch: elevenlabs | gemini
-      - TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs}
-      # TTS — ElevenLabs
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
-      - ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-eleven_turbo_v2_5}
-      - ELEVENLABS_LANGUAGE=${ELEVENLABS_LANGUAGE:-ar}
-      # TTS — Gemini 2.5 Flash (Google AI Studio), used only if TTS_PROVIDER=gemini
-      - TTS_VOICE_NAME=${TTS_VOICE_NAME:-Aoede}
-      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
+      # TTS — Cartesia Sonic 3.5
+      - CARTESIA_MODEL=${CARTESIA_MODEL:-sonic-3.5}
+      - CARTESIA_VOICE_ID=${CARTESIA_VOICE_ID}
+      - CARTESIA_LANGUAGE=${CARTESIA_LANGUAGE:-ar}
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
       # SIP mode — enables BVCTelephony noise cancellation automatically
       - SIP_ENABLED=${SIP_ENABLED:-false}
       # Agent-side input noise cancellation: off, quail_vf_l, ai_coustics, nc, bvc, bvc_telephony

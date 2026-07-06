@@ -21,12 +21,12 @@ from livekit.agents import (
     room_io,
 )
 from livekit import rtc as lk_audio
-from livekit.agents import stt as stt_module
 from livekit.agents.metrics import TTSMetrics
 from livekit.agents.voice.recorder_io import RecorderIO
 from livekit.plugins import noise_cancellation, openai, silero
-from livekit.plugins import elevenlabs as elevenlabs_plugin
-from livekit.plugins import groq as groq_plugin
+from livekit.plugins import cartesia as cartesia_plugin
+from livekit.plugins.cartesia.models import TTSDefaultVoiceId as CARTESIA_DEFAULT_VOICE_ID
+from livekit.plugins import deepgram as deepgram_plugin
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 # ai_coustics requires LiveKit Cloud — import only if available
@@ -38,7 +38,6 @@ except ImportError:
 
 
 from call_logger import CallLogger
-from gemini_tts import GeminiAIStudioTTS
 from intent_classifier import needs_rag
 from rag import RagRetriever, build_rag_from_env
 
@@ -328,7 +327,7 @@ class Assistant(Agent):
         self._summary_written = False
         self._last_query: str = ""
 
-        self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
+        self.base_instructions = """أنت مساعدة ذكاء اصطناعي صوتي اسمك لينا لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
 
         القاعدة الأولى — حفظ المعلومات فوراً:
         في كل مرة يذكر فيها المستخدم اسمه أو مشكلته أو أي معلومة مهمة، استدعِ أداة add_note فوراً قبل أي رد آخر.
@@ -356,7 +355,7 @@ class Assistant(Agent):
             user_input="...",
             instructions=(
                 "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية قول التالى "
-                "[هلا بيك معك فهد ممكن اعرف اسمك الكريم] "
+                "[هلا بيك معك لينا ممكن اعرف اسمك الكريم] "
             ),
         )
         self.call_logger.log_timing("LLM", "Opening greeting generated", _time.monotonic() - _t)
@@ -499,40 +498,26 @@ async def my_agent(ctx: JobContext) -> None:
         ctx.job.agent_name,
     )
 
-    # ── STT ── Groq Whisper cloud ─────────────────────────────────────────────
-    stt_model = os.getenv("STT_MODEL", "whisper-large-v3")
-    logger.info("Starting agent with STT provider=groq model=%s", stt_model)
+    # ── STT ── Deepgram Nova-3 (Saudi Arabic) ─────────────────────────────────
+    stt_model = os.getenv("STT_MODEL", "nova-3")
+    stt_language = os.getenv("STT_LANGUAGE", "ar-SA")
+    logger.info("Starting agent with STT provider=deepgram model=%s language=%s", stt_model, stt_language)
 
-    # ── TTS ── provider switch, controlled by TTS_PROVIDER in .env.local ──────
-    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
-
-    if tts_provider == "elevenlabs":
-        elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID") or elevenlabs_plugin.DEFAULT_VOICE_ID
-        elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
-        elevenlabs_language = os.getenv("ELEVENLABS_LANGUAGE", "ar")
-        tts_instance = elevenlabs_plugin.TTS(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=elevenlabs_voice_id,
-            model=elevenlabs_model,
-            language=elevenlabs_language,
-        )
-        logger.info(
-            "TTS provider=elevenlabs model=%s voice_id=%s language=%s",
-            elevenlabs_model, elevenlabs_voice_id, elevenlabs_language,
-        )
-    elif tts_provider == "gemini":
-        tts_voice_name = os.getenv("TTS_VOICE_NAME", "Puck")
-        tts_instance = GeminiAIStudioTTS(
-            api_key=os.getenv("GOOGLE_AI_API_KEY"),
-            voice_name=tts_voice_name,
-            language_code="ar-SA",
-            model="gemini-2.5-flash-preview-tts",
-        )
-        logger.info("TTS provider=gemini-2.5-flash voice=%s", tts_voice_name)
-    else:
-        raise ValueError(
-            f"Unknown TTS_PROVIDER={tts_provider!r}. Expected 'elevenlabs' or 'gemini'."
-        )
+    # ── TTS ── Cartesia Sonic 3.5 ──────────────────────────────────────────────
+    tts_provider = "cartesia"
+    cartesia_model = os.getenv("CARTESIA_MODEL", "sonic-3.5")
+    cartesia_voice_id = os.getenv("CARTESIA_VOICE_ID") or CARTESIA_DEFAULT_VOICE_ID
+    cartesia_language = os.getenv("CARTESIA_LANGUAGE", "ar")
+    tts_instance = cartesia_plugin.TTS(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        model=cartesia_model,
+        voice=cartesia_voice_id,
+        language=cartesia_language,
+    )
+    logger.info(
+        "TTS provider=cartesia model=%s voice=%s language=%s",
+        cartesia_model, cartesia_voice_id, cartesia_language,
+    )
 
     # ── LLM ──────────────────────────────────────────────────────────────────
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
@@ -540,17 +525,13 @@ async def my_agent(ctx: JobContext) -> None:
     # ── Session ───────────────────────────────────────────────────────────────
     turn_detector = MultilingualModel()
     session = AgentSession(
-        stt=stt_module.StreamAdapter(
-            stt=groq_plugin.STT(
-                model=stt_model,
-                language="ar",
-                prompt=(
-                    "محادثة خدمة عملاء باللهجة السعودية النجدية. "
-                    "كلمات شائعة: وش، كيفك، إيش، زين، ابشر، تمام، والله، يعني، "
-                    "حياك، شلونك، عندي مشكلة، رقم الطلب، الحساب، خدمة العملاء."
-                ),
-            ),
-            vad=ctx.proc.userdata["vad"],
+        stt=deepgram_plugin.STT(
+            model=stt_model,
+            language=stt_language,
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            keyterm=[
+                "فهد", "رقم الطلب", "الحساب", "خدمة العملاء",
+            ],
         ),
         llm=openai.LLM(
             base_url="https://api.groq.com/openai/v1",
@@ -570,33 +551,6 @@ async def my_agent(ctx: JobContext) -> None:
         call_id=ctx.room.name,
         rag_retriever=ctx.proc.userdata.get("rag_retriever"),
     )
-
-    # Wire TTS generation timing into the per-call log.
-    # tts_instance is created before `assistant` (and its call_logger) exist,
-    # so we attach the callback here rather than at construction time.
-    # NOTE: `on_timing` is a custom hook implemented only by GeminiAIStudioTTS
-    # (src/gemini_tts.py). The stock livekit.plugins.elevenlabs.TTS doesn't
-    # expose it — per-request generation timing for ElevenLabs isn't logged
-    # here, but the generic "TTS playback duration" event below (wired via
-    # session.on("agent_speaking_started"/"agent_speaking_stopped")) still
-    # works the same regardless of provider.
-    if hasattr(tts_instance, "on_timing"):
-        def _on_tts_timing(event) -> None:
-            if event.success:
-                assistant.call_logger.log_timing(
-                    "TTS",
-                    "Gemini TTS generation",
-                    event.elapsed_sec,
-                    extra=f"chars={event.char_count} audio_bytes={event.audio_bytes}",
-                )
-            else:
-                assistant.call_logger.log_error(
-                    f"Gemini TTS generation FAILED after {event.elapsed_sec:.2f}s "
-                    f"(chars={event.char_count}, text='{event.text_preview}'): {event.error}",
-                    stage="TTS",
-                )
-
-        tts_instance.on_timing = _on_tts_timing
 
     session_room_options = _build_room_options()
 
@@ -656,11 +610,9 @@ async def my_agent(ctx: JobContext) -> None:
             elapsed = _time.monotonic() - _tts_start.pop("t")
             assistant.call_logger.log_timing("TTS", "TTS playback duration", elapsed)
 
-    # Provider-agnostic TTS success/timing log. Unlike the Gemini-only
-    # `on_timing` hook above (custom to gemini_tts.py), this uses the
-    # standard livekit-agents metrics event, which every TTS plugin
-    # (elevenlabs, gemini, etc.) emits after each synthesis call — this is
-    # what shows "did TTS work and how long did it take" for ElevenLabs.
+    # Provider-agnostic TTS success/timing log, using the standard
+    # livekit-agents metrics event emitted by every TTS plugin (Cartesia
+    # included) after each synthesis call.
     @session.on("metrics_collected")
     def on_metrics_collected(event: Any) -> None:
         m = getattr(event, "metrics", None)
