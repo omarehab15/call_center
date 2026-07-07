@@ -107,11 +107,11 @@ services:
       # LLM — Groq cloud
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-openai/gpt-oss-20b}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      # TTS — Cartesia Sonic 3.5
-      - CARTESIA_MODEL=${CARTESIA_MODEL:-sonic-3.5}
-      - CARTESIA_VOICE_ID=${CARTESIA_VOICE_ID}
-      - CARTESIA_LANGUAGE=${CARTESIA_LANGUAGE:-ar}
-      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
+      # TTS — ElevenLabs
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-eleven_turbo_v2_5}
+      - ELEVENLABS_LANGUAGE=${ELEVENLABS_LANGUAGE:-ar}
       # SIP mode — enables BVCTelephony noise cancellation automatically
       - SIP_ENABLED=${SIP_ENABLED:-false}
       # Agent-side input noise cancellation: off, quail_vf_l, ai_coustics, nc, bvc, bvc_telephony

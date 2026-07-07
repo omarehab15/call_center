@@ -24,8 +24,7 @@ from livekit import rtc as lk_audio
 from livekit.agents.metrics import TTSMetrics
 from livekit.agents.voice.recorder_io import RecorderIO
 from livekit.plugins import noise_cancellation, openai, silero
-from livekit.plugins import cartesia as cartesia_plugin
-from livekit.plugins.cartesia.models import TTSDefaultVoiceId as CARTESIA_DEFAULT_VOICE_ID
+from livekit.plugins import elevenlabs as elevenlabs_plugin
 from livekit.plugins import deepgram as deepgram_plugin
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -327,7 +326,7 @@ class Assistant(Agent):
         self._summary_written = False
         self._last_query: str = ""
 
-        self.base_instructions = """أنت مساعدة ذكاء اصطناعي صوتي اسمك لينا لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
+        self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك لينا لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
 
         القاعدة الأولى — حفظ المعلومات فوراً:
         في كل مرة يذكر فيها المستخدم اسمه أو مشكلته أو أي معلومة مهمة، استدعِ أداة add_note فوراً قبل أي رد آخر.
@@ -503,21 +502,53 @@ async def my_agent(ctx: JobContext) -> None:
     stt_language = os.getenv("STT_LANGUAGE", "ar-SA")
     logger.info("Starting agent with STT provider=deepgram model=%s language=%s", stt_model, stt_language)
 
-    # ── TTS ── Cartesia Sonic 3.5 ──────────────────────────────────────────────
-    tts_provider = "cartesia"
-    cartesia_model = os.getenv("CARTESIA_MODEL", "sonic-3.5")
-    cartesia_voice_id = os.getenv("CARTESIA_VOICE_ID") or CARTESIA_DEFAULT_VOICE_ID
-    cartesia_language = os.getenv("CARTESIA_LANGUAGE", "ar")
-    tts_instance = cartesia_plugin.TTS(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        model=cartesia_model,
-        voice=cartesia_voice_id,
-        language=cartesia_language,
-    )
-    logger.info(
-        "TTS provider=cartesia model=%s voice=%s language=%s",
-        cartesia_model, cartesia_voice_id, cartesia_language,
-    )
+    # ── TTS ── ElevenLabs (default) أو Google Gemini TTS عن طريق OpenRouter ────
+    # TTS_PROVIDER=elevenlabs (افتراضي) أو TTS_PROVIDER=openrouter_gemini
+    #
+    # ملحوظة مهمة: بلاجن openai (اللي بنستخدمه هنا للاتصال بـ OpenRouter) مش
+    # بيعمل streaming (capabilities.streaming=False) — يعني بيستنى الصوت
+    # يتولّد كامل قبل ما يشغله. ده ممكن يحسسك بـ latency أعلى شوية عن
+    # ElevenLabs في مكالمة حية. جرب واسمع الفرق بنفسك قبل ما تستخدمه Production.
+    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+
+    if tts_provider == "openrouter_gemini":
+        openrouter_model = os.getenv("OPENROUTER_TTS_MODEL", "google/gemini-3.1-flash-tts-preview")
+        openrouter_voice = os.getenv("OPENROUTER_TTS_VOICE", "Kore")
+        openrouter_speed = float(os.getenv("OPENROUTER_TTS_SPEED", "1.0"))
+        tts_instance = openai.TTS(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            model=openrouter_model,
+            voice=openrouter_voice,
+            speed=openrouter_speed,
+        )
+        logger.info(
+            "TTS provider=openrouter_gemini model=%s voice=%s speed=%s",
+            openrouter_model, openrouter_voice, openrouter_speed,
+        )
+    else:
+        elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+        elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID") or elevenlabs_plugin.DEFAULT_VOICE_ID
+        elevenlabs_language = os.getenv("ELEVENLABS_LANGUAGE", "ar")
+        # ElevenLabs speed range is 0.7–1.2. 1.0 = normal speed; lower = slower,
+        # higher = faster. Controlled via env var so it can be tuned without a
+        # code change/redeploy.
+        elevenlabs_speed = float(os.getenv("ELEVENLABS_SPEED", "1.0"))
+        tts_instance = elevenlabs_plugin.TTS(
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            model=elevenlabs_model,
+            voice_id=elevenlabs_voice_id,
+            language=elevenlabs_language,
+            voice_settings=elevenlabs_plugin.VoiceSettings(
+                stability=0.5,
+                similarity_boost=0.75,
+                speed=elevenlabs_speed,
+            ),
+        )
+        logger.info(
+            "TTS provider=elevenlabs model=%s voice_id=%s language=%s speed=%s",
+            elevenlabs_model, elevenlabs_voice_id, elevenlabs_language, elevenlabs_speed,
+        )
 
     # ── LLM ──────────────────────────────────────────────────────────────────
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
@@ -794,5 +825,14 @@ if __name__ == "__main__":
             entrypoint_fnc=my_agent,
             prewarm_fnc=prewarm,
             agent_name=os.getenv("LIVEKIT_AGENT_NAME", "").strip(),
+            # Local/dev default is CPU-core-count idle processes, each of which
+            # independently reloads the RAG stack (ChromaDB + sentence-transformers)
+            # and Silero VAD in prewarm(). On a small dev machine, running several
+            # of those loads concurrently causes CPU contention and can blow past
+            # initialize_process_timeout. One idle process is plenty for local
+            # testing; raise NUM_IDLE_PROCESSES in production if you need to serve
+            # multiple concurrent calls.
+            num_idle_processes=int(os.getenv("NUM_IDLE_PROCESSES", "1")),
+            initialize_process_timeout=float(os.getenv("INITIALIZE_PROCESS_TIMEOUT", "30")),
         )
     )

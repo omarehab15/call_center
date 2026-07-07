@@ -12,7 +12,7 @@ dependencies = [
     "livekit-agents[silero,turn-detector,openai]>=1.5,<2.0",
     "livekit-plugins-noise-cancellation~=0.2",
     "livekit-plugins-deepgram>=1.6.4",
-    "livekit-plugins-cartesia>=1.6.4",
+    "livekit-plugins-elevenlabs>=1.6",
     "python-dotenv",
     "livekit-plugins-ai-coustics>=0.2.0",
     "chromadb>=0.4.0",
