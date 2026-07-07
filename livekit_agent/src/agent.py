@@ -8,6 +8,7 @@ import numpy as np
 import pyloudnorm as pyln
 from dotenv import load_dotenv
 from livekit.agents import (
+    NOT_GIVEN,
     Agent,
     AgentSession,
     ChatContext,
@@ -26,6 +27,7 @@ from livekit.agents.voice.recorder_io import RecorderIO
 from livekit.plugins import noise_cancellation, openai, silero
 from livekit.plugins import elevenlabs as elevenlabs_plugin
 from livekit.plugins import deepgram as deepgram_plugin
+from openrouter_tts import OpenRouterGeminiTTS
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 # ai_coustics requires LiveKit Cloud — import only if available
@@ -326,7 +328,7 @@ class Assistant(Agent):
         self._summary_written = False
         self._last_query: str = ""
 
-        self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك لينا لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
+        self.base_instructions = """أنت مساعد ذكاء اصطناعي صوتي اسمك فهد لمركز اتصالات. يتفاعل المستخدم معك عبر الصوت.
 
         القاعدة الأولى — حفظ المعلومات فوراً:
         في كل مرة يذكر فيها المستخدم اسمه أو مشكلته أو أي معلومة مهمة، استدعِ أداة add_note فوراً قبل أي رد آخر.
@@ -354,7 +356,7 @@ class Assistant(Agent):
             user_input="...",
             instructions=(
                 "ابدأ المكالمة بتحية الشخص المتصل بلهجة سعودية ودية قول التالى "
-                "[هلا بيك معك لينا ممكن اعرف اسمك الكريم] "
+                "[هلا بيك معك فهد ممكن اعرف اسمك الكريم] "
             ),
         )
         self.call_logger.log_timing("LLM", "Opening greeting generated", _time.monotonic() - _t)
@@ -497,36 +499,74 @@ async def my_agent(ctx: JobContext) -> None:
         ctx.job.agent_name,
     )
 
-    # ── STT ── Deepgram Nova-3 (Saudi Arabic) ─────────────────────────────────
-    stt_model = os.getenv("STT_MODEL", "nova-3")
-    stt_language = os.getenv("STT_LANGUAGE", "ar-SA")
-    logger.info("Starting agent with STT provider=deepgram model=%s language=%s", stt_model, stt_language)
+    # ── STT ── Deepgram Nova-3 (افتراضي) أو ElevenLabs Scribe v2 Realtime ─────
+    # STT_PROVIDER=deepgram (افتراضي، لهجات عربي مخصصة) أو STT_PROVIDER=elevenlabs
+    # (Scribe v2 Realtime — 90+ لغة مع كشف تلقائي للغة والتبديل وسط المكالمة،
+    # مفيد لو العميل بيخلط عربي/إنجليزي في نفس الجملة. راجع القرار في المحادثة
+    # اللي أدت للتغيير ده لو حابب تفهم التريد-أوف بين الاتنين).
+    stt_provider = os.getenv("STT_PROVIDER", "deepgram").strip().lower()
 
-    # ── TTS ── ElevenLabs (default) أو Google Gemini TTS عن طريق OpenRouter ────
-    # TTS_PROVIDER=elevenlabs (افتراضي) أو TTS_PROVIDER=openrouter_gemini
-    #
-    # ملحوظة مهمة: بلاجن openai (اللي بنستخدمه هنا للاتصال بـ OpenRouter) مش
-    # بيعمل streaming (capabilities.streaming=False) — يعني بيستنى الصوت
-    # يتولّد كامل قبل ما يشغله. ده ممكن يحسسك بـ latency أعلى شوية عن
-    # ElevenLabs في مكالمة حية. جرب واسمع الفرق بنفسك قبل ما تستخدمه Production.
-    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower()
+    if stt_provider == "elevenlabs":
+        elevenlabs_stt_model = os.getenv("ELEVENLABS_STT_MODEL", "scribe_v2_realtime")
+        # من غير ما نحدد language_code، الموديل بيفعّل auto language detection
+        # ويتنقل بين اللغات وسط المكالمة نفسها. لو عايز تقفل على لغة واحدة بس
+        # (أسرع شوية وأدق لو متأكد إن كل المكالمة هتكون عربي)، حدد
+        # ELEVENLABS_STT_LANGUAGE في الـ .env.
+        elevenlabs_stt_language = os.getenv("ELEVENLABS_STT_LANGUAGE", "").strip() or None
 
-    if tts_provider == "openrouter_gemini":
-        openrouter_model = os.getenv("OPENROUTER_TTS_MODEL", "google/gemini-3.1-flash-tts-preview")
-        openrouter_voice = os.getenv("OPENROUTER_TTS_VOICE", "Kore")
-        openrouter_speed = float(os.getenv("OPENROUTER_TTS_SPEED", "1.0"))
-        tts_instance = openai.TTS(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=os.getenv("OPENROUTER_API_KEY"),
-            model=openrouter_model,
-            voice=openrouter_voice,
-            speed=openrouter_speed,
+        # IMPORTANT: لازم نمرّر server_vad هنا. البلاجن (livekit-plugins-elevenlabs
+        # 1.6.4) بيختار commit_strategy="manual" لو معملناش server_vad، وفي وضع
+        # "manual" ده، السيرفر بينتظر رسالة "commit": true من الكلاينت عشان يقفل
+        # أي جملة — لكن نسخة البلاجن دي بتبعت "commit": false في كل رسالة، حتى
+        # وقت الـ flush، فمفيش "commit": true بيتبعت أبدًا. النتيجة: السيرفر
+        # مبيرجعش أي committed_transcript، وبعد فترة صمت بيقفل الـ WebSocket
+        # (status_code=1000) → البلاجن بيعتبره خطأ غير متوقع → retry → نفس
+        # المشكلة تتكرر → الجلسة بتتقفل بالكامل بعد ما المحاولات تخلص.
+        # بتمرير server_vad، commit_strategy بيبقى "vad" فالسيرفر نفسه هو اللي
+        # بيكتشف نهاية الكلام ويقفل الجملة، من غير ما يعتمد على إشارة مكسورة.
+        stt_instance = elevenlabs_plugin.STT(
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            model_id=elevenlabs_stt_model,
+            language_code=elevenlabs_stt_language or NOT_GIVEN,
+            keyterms=["فهد", "رقم الطلب", "الحساب", "خدمة العملاء"],
+            server_vad={
+                "vad_silence_threshold_secs": 0.5,
+                "min_silence_duration_ms": 500,
+            },
         )
         logger.info(
-            "TTS provider=openrouter_gemini model=%s voice=%s speed=%s",
-            openrouter_model, openrouter_voice, openrouter_speed,
+            "Starting agent with STT provider=elevenlabs model=%s language=%s (auto-detect=%s, "
+            "commit_strategy=vad)",
+            elevenlabs_stt_model, elevenlabs_stt_language or "auto", elevenlabs_stt_language is None,
         )
     else:
+        stt_model = os.getenv("STT_MODEL", "nova-3")
+        stt_language = os.getenv("STT_LANGUAGE", "ar-SA")
+        stt_instance = deepgram_plugin.STT(
+            model=stt_model,
+            language=stt_language,
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            keyterm=[
+                "فهد", "رقم الطلب", "الحساب", "خدمة العملاء",
+            ],
+        )
+        logger.info(
+            "Starting agent with STT provider=deepgram model=%s language=%s", stt_model, stt_language
+        )
+
+    # ── TTS ── Google Gemini TTS عن طريق OpenRouter (default) أو ElevenLabs (fallback) ────
+    # TTS_PROVIDER=openrouter_gemini (افتراضي) أو TTS_PROVIDER=elevenlabs
+    #
+    # ملحوظة مهمة: بنستخدم بلاجن مخصص (openrouter_tts.py) بدل livekit-plugins-openai
+    # المباشر. السبب: بلاجن openai بيوجّه أي موديل غير tts-1/tts-1-hd (زي موديل
+    # Gemini بتاعنا) لمسار SSEChunkedStream اللي بيطلب stream_format="sse" ويحاول
+    # يقرا "data: {...}" JSON lines من الرد. لكن OpenRouter بيرجّع دايمًا raw audio
+    # bytes (مش JSON/SSE) بغض النظر عن الفورمات المطلوب — فمفيش أسطر تتطابق،
+    # وبيفشل بصمت بـ "no audio frames were pushed". البلاجن المخصص بيتعامل مع
+    # الرد كـ raw PCM bytes صح، وبيعمل pipelining على مستوى الجملة لتقليل الـ latency.
+    tts_provider = os.getenv("TTS_PROVIDER", "openrouter_gemini").strip().lower()
+
+    if tts_provider == "elevenlabs":
         elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
         elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID") or elevenlabs_plugin.DEFAULT_VOICE_ID
         elevenlabs_language = os.getenv("ELEVENLABS_LANGUAGE", "ar")
@@ -549,6 +589,20 @@ async def my_agent(ctx: JobContext) -> None:
             "TTS provider=elevenlabs model=%s voice_id=%s language=%s speed=%s",
             elevenlabs_model, elevenlabs_voice_id, elevenlabs_language, elevenlabs_speed,
         )
+    else:
+        openrouter_model = os.getenv("OPENROUTER_TTS_MODEL", "google/gemini-3.1-flash-tts-preview")
+        openrouter_voice = os.getenv("OPENROUTER_TTS_VOICE", "Kore")
+        openrouter_speed = float(os.getenv("OPENROUTER_TTS_SPEED", "1.0"))
+        tts_instance = OpenRouterGeminiTTS(
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            model=openrouter_model,
+            voice=openrouter_voice,
+            speed=openrouter_speed,
+        )
+        logger.info(
+            "TTS provider=openrouter_gemini model=%s voice=%s speed=%s (custom plugin, raw PCM)",
+            openrouter_model, openrouter_voice, openrouter_speed,
+        )
 
     # ── LLM ──────────────────────────────────────────────────────────────────
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
@@ -556,14 +610,7 @@ async def my_agent(ctx: JobContext) -> None:
     # ── Session ───────────────────────────────────────────────────────────────
     turn_detector = MultilingualModel()
     session = AgentSession(
-        stt=deepgram_plugin.STT(
-            model=stt_model,
-            language=stt_language,
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            keyterm=[
-                "فهد", "رقم الطلب", "الحساب", "خدمة العملاء",
-            ],
-        ),
+        stt=stt_instance,
         llm=openai.LLM(
             base_url="https://api.groq.com/openai/v1",
             model=groq_llm_model,
@@ -626,18 +673,23 @@ async def my_agent(ctx: JobContext) -> None:
 
     _tts_start: dict[str, float] = {}
 
-    @session.on("agent_speaking_started")
-    def on_agent_speaking_started(event: Any) -> None:
+    # NOTE: livekit-agents has NO "agent_speaking_started"/"agent_speaking_stopped"
+    # events (that was the bug — those handlers were silently dead code, since
+    # session.on() doesn't validate event names at registration time).
+    # The real event is "agent_state_changed", with AgentState being one of
+    # "initializing" | "idle" | "listening" | "thinking" | "speaking".
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event: Any) -> None:
         import time as _time
-        _now = _time.monotonic()
-        _llm_reply_start["t"] = _now
-        _tts_start["t"] = _now
-        assistant.call_logger.log_system_event("TTS playback started", stage="TTS")
+        new_state = getattr(event, "new_state", None)
+        old_state = getattr(event, "old_state", None)
 
-    @session.on("agent_speaking_stopped")
-    def on_agent_speaking_stopped(event: Any) -> None:
-        import time as _time
-        if "t" in _tts_start:
+        if new_state == "speaking":
+            _now = _time.monotonic()
+            _llm_reply_start["t"] = _now
+            _tts_start["t"] = _now
+            assistant.call_logger.log_system_event("TTS playback started", stage="TTS")
+        elif old_state == "speaking" and "t" in _tts_start:
             elapsed = _time.monotonic() - _tts_start.pop("t")
             assistant.call_logger.log_timing("TTS", "TTS playback duration", elapsed)
 
@@ -673,6 +725,31 @@ async def my_agent(ctx: JobContext) -> None:
                 elapsed = _time.monotonic() - _llm_reply_start.pop("t")
                 assistant.call_logger.log_timing("LLM", "LLM reply generated", elapsed,
                                                  extra=f"chars={len(text)}")
+
+    # Catch-all for TTS/STT/LLM failures. Providers raise via the standard
+    # livekit-agents error machinery (e.g. TTS "no audio frames were pushed"
+    # after a provider returns empty audio for an invalid voice/model/etc.).
+    # Previously nothing subscribed to this event, so these failures only
+    # ever showed up in the console/stdout logger of the individual plugin
+    # (e.g. openrouter_tts's own `logger.warning`) and never in call_logs/.
+    _ERROR_STAGE_BY_TYPE = {
+        "tts_error": "TTS",
+        "stt_error": "STT",
+        "llm_error": "LLM",
+    }
+
+    @session.on("error")
+    def on_session_error(event: Any) -> None:
+        err = getattr(event, "error", None)
+        err_type = getattr(err, "type", None)
+        stage = _ERROR_STAGE_BY_TYPE.get(err_type, "ERROR")
+        label = getattr(err, "label", "unknown")
+        recoverable = getattr(err, "recoverable", None)
+        underlying = getattr(err, "error", err)  # the wrapped Exception, if present
+        assistant.call_logger.log_error(
+            f"{stage} error (provider={label}, recoverable={recoverable}): {underlying}",
+            stage=stage,
+        )
 
     @session.on("close")
     def on_session_close(event: Any) -> None:
