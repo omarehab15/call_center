@@ -14,5 +14,9 @@ rag/.last_ingest
 **/__pycache__/
 *.pyc
 
-
-D:\Work\local_call_center\livekit_agent\Office Sounds - Coffitivity White Noise ASMR(MP3_320K).mp3
+# Local test and media files
+test.md
+livekit_agent/test.ipynb
+test_tts.py
+**/Office\ Sounds\ -\ Coffitivity\ White\ Noise\ ASMR\(MP3_320K\).mp3
+call_recordings/
